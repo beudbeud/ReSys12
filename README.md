@@ -79,46 +79,42 @@ screen are simplified when that buys speed.
 Set names are the MAME set names. ROMs must match the MAME romset (see [ROM sets](#rom-sets)); clone sets read missing
 files from the parent zip. System 12 has no BIOS.
 
-**Status**: *Playable*, *Partial* or *Not working* on a PS Vita at 444 MHz. *Partial* sets run, but a known problem
-remains (listed in the notes). Full speed is 60 fps (59.94 Hz).
+**Status**: on a Raspberry Pi 5 with the libretro core (ari64 recompiler, see [libretro core](#libretro-core-linux-raspberry-pi-5)).
+*Playable*: a game was played through; *Boots*: start-up, attract mode and menus work, gameplay not reached in the test
+runs yet; *Partial*: runs, with the known problem in the notes; *Not working* / *Untested* as written. Every set runs
+well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlnow 56.9 s; 150 s of play each).
 
-**FPS**: emulated frames per second measured on a PS Vita at 444 MHz in a gameplay scene (30 seconds with the
-buttons pressed, latest measurement). Some games draw fewer new pictures than that on purpose (noted).
-
-**libretro (Pi 5)**: the libretro core on a Raspberry Pi 5 (ari64 recompiler). *Playable*: a game was played
-through; *Boots*: start-up, attract mode or menus seen, gameplay not checked yet; *Untested*: not run with this core.
-Every set run so far is well above full speed (9000 frames: tektagt 13.0 s, kartduel 13.2 s, truckk 42.7 s,
-ujlnow 56.7 s).
-
-| Game | Sets (parent first) | Year | Status | FPS | Notes | libretro (Pi 5) |
-|---|---|---|---|---|---|---|
-| Tekken Tag Tournament | `tektagt`, `tektagtc1a`, `tektagtub`, `tektagtuc1`, `tektagtjc1` | 1999 | Playable | 59.94 | | Playable |
-| Tekken 3 | `tekken3`, `tekken3a`, `tekken3b`, `tekken3c`, `tekken3d`, `tekken3ua`, `tekken3ud`, `tekken3ja`, `tekken3jd`, `tekken3je1` | 1997 | Playable | 59.94 | | Boots |
-| Soul Calibur | `soulclbr`, `soulclbrab`, `soulclbrac`, `soulclbrub`, `soulclbruc`, `soulclbrja2`, `soulclbrjb`, `soulclbrjc` | 1998 | Playable | 59.93 | | Playable |
-| Ehrgeiz | `ehrgeiz`, `ehrgeizua`, `ehrgeizja` | 1998 | Playable | 59.94 | | Playable |
-| Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable | 59.89 | | Untested |
-| Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable | 59.94 | | Untested |
-| Libero Grande | `lbgrande` | 1997 | Playable | 59.94 | the game draws 30 pictures a second | Untested |
-| Super World Stadium '98 | `sws98` | 1998 | Playable | 59.90 | | Untested |
-| Super World Stadium '99 | `sws99` | 1999 | Playable | 59.94 | | Untested |
-| Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable | 59.94 | | Boots |
-| Aqua Rush | `aquarush` | 1999 | Playable | 59.94 | | Untested |
-| Tenkomori Shooting | `tenkomor`, `tenkomorja1` | 1998 | Playable | 59.83 | vertical screen | Boots: vertical screen (the core sets the rotation) |
-| Paca Paca Passion | `pacapp` | 1998 | Partial | 59.85 | falling notes may be drawn twice | Playable |
-| Paca Paca Passion 2 | `pacapp2` | 1999 | Partial | 59.86 | as above | Untested |
-| Paca Paca Passion Special | `pacappsp` | 1999 | Partial | 59.94 | as above | Untested |
-| Derby Quiz My Dream Horse | `mdhorse` | 1998 | Playable | 59.94 | the game draws about 40 pictures a second | Untested |
-| Kaiun Quiz | `kaiunqz` | 1999 | Playable | 59.94 | the game draws about 35 pictures a second | Untested |
-| Point Blank 2 / Gunbarl | `ptblank2`, `gunbarl` | 1999 | Partial | 59.94 | gun on an analog stick or touch; may stop during play | Playable: lightgun (RetroArch lightgun device or left stick) |
-| Ghoul Panic / Oh! Bakyuuun | `ghlpanic`, `ohbakyuun` | 1999 | Playable | 59.94 | gun on an analog stick or touch | Untested |
-| Golgo 13 | `golgo13` | 1999 | Partial | 59.94 | the board tests its ROMs for a while after power-on | Boots: attract mode after the board ROM test (about 50 s); lightgun |
-| Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Partial | 59.94 | as above | Untested |
-| Techno Drive | `technodr` | 1998 | Playable | 59.94 | wheel on an analog stick; needs `namco_emio102.zip` (I/O board ROM) next to the set | Boots: needs `namco_emio102.zip`; wheel on the left stick, R2 gas, L2 brake |
-| Attack Pla Rail | `aplarail` | 1998 | Playable | 59.94 | lever on an analog stick; the game draws 40 pictures a second | Untested |
-| Kart Duel | `kartduel`, `kartduelja` | 2000 | Partial | | no link play | Playable: one cabinet, and two linked cabinets race each other over UDP (core options `resys12_link`, `resys12_link_id`: a different PCB ID per cabinet, both at full speed) |
-| Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | | bad dumps, also not working in MAME | Untested |
-| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Not working | | also not working in MAME | Boots: sws2000 reaches team select, sws2001 the attract mode (one rare host crash in 7 runs) |
-| Um Jammer Lammy NOW!, Quest for Fame, Truck Kyosokyoku | `ujlnow`, `questff`, `truckk` | 1999 | Not working | | CD-XA board, not emulated | Boots: ujlnow and truckk from their CHD (`<set>/<disc>.chd`), movies and CD audio; questff untested |
+| Game | Sets (parent first) | Year | Status | Notes |
+|---|---|---|---|---|
+| Tekken Tag Tournament | `tektagt`, `tektagtc1a`, `tektagtub`, `tektagtuc1`, `tektagtjc1` | 1999 | Playable |  |
+| Tekken 3 | `tekken3`, `tekken3a`, `tekken3b`, `tekken3c`, `tekken3d`, `tekken3ua`, `tekken3ud`, `tekken3ja`, `tekken3jd`, `tekken3je1` | 1997 | Playable |  |
+| Soul Calibur | `soulclbr`, `soulclbrab`, `soulclbrac`, `soulclbrub`, `soulclbruc`, `soulclbrja2`, `soulclbrjb`, `soulclbrjc` | 1998 | Playable |  |
+| Ehrgeiz | `ehrgeiz`, `ehrgeizua`, `ehrgeizja` | 1998 | Playable |  |
+| Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable |  |
+| Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable |  |
+| Libero Grande | `lbgrande` | 1997 | Playable | the game draws 30 pictures a second |
+| Super World Stadium '98 | `sws98` | 1998 | Boots | the test runs reach team select, a match is not reached yet |
+| Super World Stadium '99 | `sws99` | 1999 | Boots | as `sws98` |
+| Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable |  |
+| Aqua Rush | `aquarush` | 1999 | Playable |  |
+| Tenkomori Shooting | `tenkomor`, `tenkomorja1` | 1998 | Playable | vertical screen (the core sets the rotation) |
+| Paca Paca Passion | `pacapp` | 1998 | Playable | the Vita build drew falling notes twice; not checked here |
+| Paca Paca Passion 2 | `pacapp2` | 1999 | Playable |  |
+| Paca Paca Passion Special | `pacappsp` | 1999 | Playable |  |
+| Derby Quiz My Dream Horse | `mdhorse` | 1998 | Playable | the game draws about 40 pictures a second |
+| Kaiun Quiz | `kaiunqz` | 1999 | Playable | the game draws about 35 pictures a second |
+| Point Blank 2 / Gunbarl | `ptblank2`, `gunbarl` | 1999 | Playable | lightgun (RetroArch lightgun device, or the left stick) |
+| Ghoul Panic / Oh! Bakyuuun | `ghlpanic`, `ohbakyuun` | 1999 | Playable | lightgun |
+| Golgo 13 | `golgo13` | 1999 | Playable | lightgun; the board tests its ROMs for about 50 s after power-on |
+| Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Playable | as `golgo13` |
+| Techno Drive | `technodr` | 1998 | Playable | needs `namco_emio102.zip`; wheel on the left stick, R2 gas, L2 brake |
+| Attack Pla Rail | `aplarail` | 1998 | Playable | lever on the left stick |
+| Kart Duel | `kartduel`, `kartduelja` | 2000 | Playable | two cabinets race over UDP: core options `resys12_link`, `resys12_link_id` (one PCB ID each) |
+| Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | bad dumps, also not working in MAME |
+| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach team select (`sws2000`) and the batting order (`sws2001`), not a match; not working in MAME |
+| Um Jammer Lammy NOW! | `ujlnow` | 1999 | Playable | CD-XA board: disc `ujlnow/ul1-a.chd` next to the zip, CD audio |
+| Truck Kyosokyoku | `truckk` | 2000 | Partial | boots from `truckk/tkk2-a.chd` to the title; its I/O CPU (H8/3334) is not emulated, so the horn button that starts a game is not read |
+| Quest for Fame | `questff` | 1999 | Untested | CD-XA board; no dump here |
 
 ## 4. Download
 
