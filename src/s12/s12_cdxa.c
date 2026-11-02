@@ -10,6 +10,7 @@
 #include "r3000a.h"
 #include "sh2.h"
 #include "s12_atapi.h"
+#include "s12_cdmix.h"
 
 #define SH2_CLOCK 14745600.0
 #define PSX_CLOCK 33868800.0
@@ -538,6 +539,7 @@ static void wr32(uint32_t a, uint32_t v)
 
 void s12_cdxa_reset(void)
 {
+	s12_cdmix_clear();
 	memset(&cd, 0, sizeof(cd));
 	cd.cpu.bus = (SH2Bus){ rd8, rd16, rd32, wr8, wr16, wr32 };
 	cd.cpu.irq_ack = irq_ack;
@@ -559,6 +561,7 @@ void s12_cdxa_state_save(void *dst)
 
 void s12_cdxa_state_load(const void *src)
 {
+	s12_cdmix_clear();
 	const SH2Bus bus = cd.cpu.bus;
 	void (*ack)(int) = cd.cpu.irq_ack;
 	memcpy(&cd, src, sizeof(cd));
