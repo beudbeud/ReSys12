@@ -33,3 +33,5 @@ Thumbs.db
 # editable art sources (tools/make_app_art.py)
 art_psd/
 *.psd
+*.so
+libretro/obj/

@@ -283,6 +283,18 @@ cmake --build build-vita              # build-vita/eboot.bin
 cmake --build build-vita --target vpk # build-vita/resys12.vpk
 ```
 
+### libretro core (Linux, Raspberry Pi 5)
+
+```bash
+make -C libretro                          # native (x86_64: R3000A interpreter)
+make -C libretro CC=aarch64-linux-gnu-gcc # Raspberry Pi 5, 64-bit OS (ari64 recompiler); needs an aarch64 zlib,
+                                          # e.g. LDFLAGS=-L<dir with libz.so>
+retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
+```
+
+RetroPad: Y X B A L R L2 R2 = buttons 1-8, Start, Select = coin, L3 = test, R3 = service. The EEPROM is the
+core's save RAM (`.srm`); save states go through RetroArch.
+
 ## 8. Project Layout
 
 ```
@@ -293,6 +305,7 @@ src/sound/     C352
 src/romload/   MAME set tables, zip reader, ROM cache
 src/sys/       Vita heap and JIT memory
 vita/          PS Vita port: frontend, video output (vitaGL), platform code, LiveArea assets
+libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5)
 ```
 
 ## 9. Accuracy and Testing
