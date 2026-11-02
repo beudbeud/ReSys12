@@ -165,8 +165,9 @@ static void poll_input(void)
 	if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3))
 		sys |= S12_SYS_TEST;
 	s12.in.system = sys;
-	analog_input();
 }
+
+static int s_link_id; // Kart Duel PCB ID to write into the EEPROM settings (0: leave them)
 
 // ---- libretro ----
 void retro_set_environment(retro_environment_t cb)
@@ -176,6 +177,7 @@ void retro_set_environment(retro_environment_t cb)
 	cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
 	static const struct retro_variable vars[] = {
 		{ "resys12_link", "Cabinet link (Kart Duel, udp port, content restart); disabled|22260|22270" },
+		{ "resys12_link_id", "Cabinet PCB ID (Kart Duel, content restart); 1|2" },
 		{ NULL, NULL },
 	};
 	cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
@@ -262,6 +264,11 @@ bool retro_load_game(const struct retro_game_info *game)
 			port = strtol(v.value, NULL, 10); // ("disabled" gives 0)
 		if (port > 0 && port < 65536 - 8 && !rs12_link_start((uint16_t)port))
 			fprintf(stderr, "ReSys12: link: no free udp port at %ld\n", port);
+		struct retro_variable id = { "resys12_link_id", NULL };
+		if (getenv("RS12_LINK_ID"))
+			s_link_id = atoi(getenv("RS12_LINK_ID"));
+		else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &id) && id.value)
+			s_link_id = atoi(id.value);
 	}
 
 	memset(&Config, 0, sizeof(Config));
@@ -407,8 +414,6 @@ static void test_hooks(uint32_t frame)
 	} else
 		s12.in.player[0] |= cur_p1;
 	s12.in.system |= cur_sys;
-	if (in_n)
-		analog_input(); // (pedals and wheel from the scripted buttons)
 #ifdef RS12_HARNESS
 	{ // RS12_RAMDUMP=frame,frame,...: main RAM to <RS12_DUMP_DIR>/ram_<frame>.bin; RS12_WATCH=lo-hi[,from]: stores logged
 		static const char *rd; static int rd_init;
@@ -481,8 +486,13 @@ static void mix_cd_audio(int n)
 void retro_run(void)
 {
 	static uint32_t frame;
+	if (!frame && s_link_id > 0 && s12.eeprom[0x144] != s_link_id - 1) { // Kart Duel PCB ID (after the frontend loaded the .srm)
+		s12.eeprom[0x15a] = (uint8_t)(s12.eeprom[0x15a] + s12.eeprom[0x144] - (s_link_id - 1)); // (settings check byte: NOR of a sum)
+		s12.eeprom[0x144] = (uint8_t)(s_link_id - 1);
+	}
 	poll_input();
 	test_hooks(frame++);
+	analog_input(); // once a frame, after the scripted buttons (the d-pad wheel ramps per call)
 	psxRegs.stop = 0;
 	psxCpu->Execute(&psxRegs);
 	S12SoundBatch *b = s12_sub_sound_frame(s_snd_prev);

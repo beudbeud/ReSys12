@@ -4,6 +4,11 @@
 #define h8_adc_in h8l_adc_in
 #define h8_adtrg_w h8l_adtrg_w
 #define h8_blk_enable h8l_blk_enable
+#define h8_dmac h8l_dmac
+#define h8_bus_read8 h8l_bus_read8
+#define h8_bus_read16 h8l_bus_read16
+#define h8_bus_write8 h8l_bus_write8
+#define h8_bus_write16 h8l_bus_write16
 #define h8_dump_unimplemented h8l_dump_unimplemented
 #define h8_ext_read16 h8l_ext_read16
 #define h8_ext_read8 h8l_ext_read8
