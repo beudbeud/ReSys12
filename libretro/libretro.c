@@ -1,4 +1,5 @@
 // ReSys12: libretro frontend. Content = a MAME System 12 zip (parent sets next to it). GPL-2.0-or-later.
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,7 @@ volatile int rs12_rw_hit[5], rs12_rw_max[11], rs12_rw_full[6];
 
 static S12Rom s_rom;
 static int s_vertical; // the screen is turned a quarter: the picture is 3:4
+static void cd_fifo_clear(void);
 static int s_loaded;
 static S12SoundBatch *s_snd_prev;
 static int16_t s_snd_buf[S12_SOUND_MAX_FRAMES * 2];
@@ -312,6 +314,7 @@ bool retro_load_game(const struct retro_game_info *game)
 	GPU_open(NULL, NULL, NULL);
 	psxReset();
 	s_snd_prev = NULL;
+	cd_fifo_clear();
 	s_loaded = 1;
 	fprintf(stderr, "ReSys12: %s loaded (%s), %s\n", name, msg, Config.Cpu == CPU_DYNAREC ? "ari64 dynarec" : "interpreter");
 	return true;
@@ -343,6 +346,7 @@ void retro_unload_game(void)
 
 void retro_reset(void)
 {
+	cd_fifo_clear();
 	if (s_loaded)
 		psxReset();
 }
@@ -449,34 +453,104 @@ static void test_hooks(uint32_t frame)
 	}
 }
 
-// CDXA board audio (37800 Hz) mixed into the C352 frame at 0.30 as MAME's routing. The frame's CD samples are stretched
-// over the frame's C352 samples (ponytail: per-frame linear stretch; a running resampler if the pitch wobble is heard)
+// CDXA board audio (37800 Hz) mixed into the C352 output at 0.30 as MAME's routing. A FIFO and a fixed-rate polyphase
+// windowed-sinc resampler whose position carries over frames (the chip's DAC oversamples with a digital filter: linear
+// interpolation left images at -35 dB, heard as hiss); the step follows the FIFO level so frame jitter cannot drift
+#define CD_FIFO 8192
+#define CD_TARGET 1024 // sample pairs kept ahead: about 1.6 frames at 37800 Hz
+#define CD_TAPS 16
+#define CD_HIST (CD_TAPS / 2 - 1) // past samples the filter still reads
+#define CD_PHASES 256
+static int16_t s_cd_fifo[CD_FIFO * 2];
+static int s_cd_n, s_cd_primed;
+static uint32_t s_cd_frac; // position after s_cd_fifo[CD_HIST], 16.16
+static float s_cd_fir[CD_PHASES + 1][CD_TAPS];
+
+static void cd_fifo_clear(void)
+{
+	memset(s_cd_fifo, 0, (size_t)CD_HIST * 4);
+	s_cd_n = CD_HIST;
+	s_cd_primed = 0;
+	s_cd_frac = 0;
+	if (s_cd_fir[0][CD_HIST + 1] != 0.0f)
+		return;
+	const double fc = 0.9 * 0.5; // cutoff at 90 % of the source Nyquist, in cycles per source sample
+	for (int ph = 0; ph <= CD_PHASES; ph++) {
+		double sum = 0;
+		for (int t = 0; t < CD_TAPS; t++) {
+			const double x = (double)(t - CD_HIST) - (double)ph / CD_PHASES; // distance to the output point
+			const double sinc = x == 0 ? 2 * fc : sin(2 * M_PI * fc * x) / (M_PI * x);
+			const double wpos = (x + CD_TAPS / 2.0) / CD_TAPS; // Blackman window over the taps
+			const double win = 0.42 - 0.5 * cos(2 * M_PI * wpos) + 0.08 * cos(4 * M_PI * wpos);
+			s_cd_fir[ph][t] = (float)(sinc * win);
+			sum += sinc * win;
+		}
+		for (int t = 0; t < CD_TAPS; t++) // unity gain at every phase
+			s_cd_fir[ph][t] = (float)(s_cd_fir[ph][t] / sum);
+	}
+}
+
 static void mix_cd_audio(int n)
 {
-	static int16_t cdbuf[4096 * 2];
-	const int m = s12_cdxa_audio(cdbuf, 4096);
-	if (m <= 0)
-		return;
+	int16_t *cdbuf = s_cd_fifo + s_cd_n * 2;
+	const int m = s12_cdxa_audio(cdbuf, CD_FIFO - s_cd_n);
+	if (m > 0)
+		s_cd_n += m;
 #ifdef RS12_HARNESS
-	static FILE *raw;
-	static int raw_init;
-	if (!raw_init) { // diagnostics: RS12_CDRAW=file gets the CD audio alone (s16 stereo at 37800 Hz)
-		raw_init = 1;
+	static FILE *raw, *out;
+	static int dbg_init;
+	if (!dbg_init) { // diagnostics: RS12_CDRAW / RS12_CDOUT get the CD audio alone, at 37800 Hz / resampled
+		dbg_init = 1;
 		if (getenv("RS12_CDRAW"))
 			raw = fopen(getenv("RS12_CDRAW"), "wb");
+		if (getenv("RS12_CDOUT"))
+			out = fopen(getenv("RS12_CDOUT"), "wb");
 	}
-	if (raw)
+	if (raw && m > 0)
 		fwrite(cdbuf, 4, (size_t)m, raw);
+	if (getenv("RS12_CDRATE")) { // diagnostics: CD sample pairs per frame over each 600 frames, FIFO level
+		static int frames, sum;
+		sum += m > 0 ? m : 0;
+		if (++frames % 600 == 0) {
+			fprintf(stderr, "cdrate f%d %.2f pairs/frame fifo %d\n", frames, sum / 600.0, s_cd_n - CD_HIST);
+			sum = 0;
+		}
+	}
 #endif
-	for (int i = 0; i < n; i++) {
-		const int64_t pos = (int64_t)i * m * 256 / n; // 8 bits of fraction
-		const int j = (int)(pos >> 8), f = (int)(pos & 255), k = j + 1 < m ? j + 1 : j;
+	const int avail = s_cd_n - CD_HIST;
+	if (!s_cd_primed && avail < CD_TARGET)
+		return;
+	s_cd_primed = 1;
+	// proportional and tiny (256 pairs off target = 0.024 %), so the pitch never steps audibly
+	const int64_t base = ((int64_t)S12_CDXA_RATE << 16) / S12_SOUND_RATE;
+	const uint32_t step = (uint32_t)(base + base * (avail - CD_TARGET) / 1048576);
+	uint32_t pos = s_cd_frac;
+	for (int i = 0; i < n; i++, pos += step) {
+		const int j = CD_HIST + (int)(pos >> 16); // the output point lies between j and j + 1
+		if (j + CD_TAPS / 2 >= s_cd_n) // underrun: stop mixing until the FIFO refills
+			break;
+		const float *fir = s_cd_fir[(pos >> 8) & 255];
+		const int16_t *src = s_cd_fifo + (j - CD_HIST) * 2;
+		float l = 0, r = 0;
+		for (int t = 0; t < CD_TAPS; t++) {
+			l += fir[t] * src[t * 2];
+			r += fir[t] * src[t * 2 + 1];
+		}
+		const int cd[2] = { (int)lrintf(l), (int)lrintf(r) };
 		for (int c = 0; c < 2; c++) {
-			const int cdv = (cdbuf[j * 2 + c] * (256 - f) + cdbuf[k * 2 + c] * f) >> 8;
-			int v = s_snd_buf[i * 2 + c] + cdv * 3 / 10;
+#ifdef RS12_HARNESS
+			if (out) { const int16_t o = (int16_t)(cd[c] > 32767 ? 32767 : cd[c] < -32768 ? -32768 : cd[c]); fwrite(&o, 2, 1, out); }
+#endif
+			const int v = s_snd_buf[i * 2 + c] + cd[c] * 3 / 10;
 			s_snd_buf[i * 2 + c] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 		}
 	}
+	int used = (int)(pos >> 16);
+	if (used > s_cd_n - CD_TAPS)
+		used = s_cd_n - CD_TAPS > 0 ? s_cd_n - CD_TAPS : 0;
+	s_cd_frac = used == (int)(pos >> 16) ? (pos & 0xffff) : 0;
+	memmove(s_cd_fifo, s_cd_fifo + used * 2, (size_t)(s_cd_n - used) * 4);
+	s_cd_n -= used;
 }
 
 void retro_run(void)
@@ -517,6 +591,7 @@ bool retro_serialize(void *data, size_t size)
 
 bool retro_unserialize(const void *data, size_t size)
 {
+	cd_fifo_clear();
 	return s_loaded && s12_state_load(data, size) == 0;
 }
 

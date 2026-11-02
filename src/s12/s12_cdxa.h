@@ -6,6 +6,10 @@
 #include <stdint.h>
 
 void s12_cdxa_reset(void);
+// save states: the board (SH-2, RAMs, on-chip registers, DAC) and its drive
+uint32_t s12_cdxa_state_size(void);
+void s12_cdxa_state_save(void *dst);
+void s12_cdxa_state_load(const void *src);
 // opens the set's disc image (MAME layout <roms_dir>/<set>/<disc>.chd); 0 when found
 int s12_cdxa_open_disc(const char *roms_dir, const char *set);
 // main CPU side, 0x1f7c0000-0x1f7fffff; returns 0 when the address is not the board's

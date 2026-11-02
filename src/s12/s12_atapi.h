@@ -13,5 +13,9 @@ uint16_t s12_atapi_r(int reg);
 void s12_atapi_w(int reg, uint16_t v);
 // DREQ: the drive has data for the host to read
 int s12_atapi_drq(void);
+// save states: the drive's registers, command and buffer (the open disc and its read cache stay)
+uint32_t s12_atapi_state_size(void);
+void s12_atapi_state_save(void *dst);
+void s12_atapi_state_load(const void *src);
 
 #endif

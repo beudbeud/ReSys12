@@ -28,6 +28,8 @@ static struct {
 	int tx_busy;            // SCI0 shift register holds a byte
 	uint8_t tx_byte;
 	int64_t tx_done;        // SH2 cycle when the byte in the shift register is out
+	int64_t tx_end_fp;      // exact end of that byte, 16.16 SH2 cycles (the next queued byte starts there)
+	int tx_chain;           // TDR was refilled during the byte: start at tx_end_fp, not at the late check
 	int dac_bits, dac_lr;   // LC78836M: bytes of the current word, channel (first word: left)
 	uint16_t dac_word;
 	int16_t dac_l;
@@ -212,9 +214,14 @@ static void sci_tdr_loaded(void)
 	if (!(SCR0 & SCR_TE))
 		return;
 	if (!cd.tx_busy && !(cd.sci_ssr & SSR_TDRE)) {
+		// 8 of the 32 bits of a stereo sample at 37800 Hz: 97.52 SH2 cycles, kept exact so the rate does not drift
+		const int64_t period = (int64_t)(SH2_CLOCK * 65536.0 / (37800.0 * 32.0 / 8.0) + 0.5);
+		const int64_t now = cd.cpu.cycles << 16;
+		const int64_t start = cd.tx_chain && cd.tx_end_fp > 0 && cd.tx_end_fp < now ? cd.tx_end_fp : now;
 		cd.tx_busy = 1;
 		cd.tx_byte = REG8(0xffff81a3u);
-		cd.tx_done = cd.cpu.cycles + 98; // 8 bits of 32 per stereo sample at 37800 Hz
+		cd.tx_end_fp = start + period;
+		cd.tx_done = (cd.tx_end_fp + 0xffff) >> 16;
 		cd.sci_ssr = (uint8_t)((cd.sci_ssr & ~SSR_TEND) | SSR_TDRE);
 	}
 	sci_update();
@@ -244,7 +251,9 @@ static void sci_tx_event(void)
 	cd.tx_busy = 0;
 	dac_byte(cd.tx_byte);
 	if (!(cd.sci_ssr & SSR_TDRE)) {
+		cd.tx_chain = 1;
 		sci_tdr_loaded();
+		cd.tx_chain = 0;
 	} else {
 		cd.sci_ssr |= SSR_TEND;
 		sci_update();
@@ -535,6 +544,27 @@ void s12_cdxa_reset(void)
 	cd.sci_ssr = SSR_TDRE | SSR_TEND;
 	s12_atapi_reset();
 	cd.last_cycle = psxRegs.cycle;
+}
+
+uint32_t s12_cdxa_state_size(void)
+{
+	return (uint32_t)sizeof(cd) + s12_atapi_state_size();
+}
+
+void s12_cdxa_state_save(void *dst)
+{
+	memcpy(dst, &cd, sizeof(cd));
+	s12_atapi_state_save((uint8_t *)dst + sizeof(cd));
+}
+
+void s12_cdxa_state_load(const void *src)
+{
+	const SH2Bus bus = cd.cpu.bus;
+	void (*ack)(int) = cd.cpu.irq_ack;
+	memcpy(&cd, src, sizeof(cd));
+	cd.cpu.bus = bus;
+	cd.cpu.irq_ack = ack;
+	s12_atapi_state_load((const uint8_t *)src + sizeof(cd));
 }
 
 void s12_cdxa_run(uint32_t main_cycles)

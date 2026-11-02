@@ -3,6 +3,7 @@
 // GPL-2.0-or-later.
 #include "s12_state.h"
 #include "s12_link.h"
+#include "s12_cdxa.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -176,6 +177,17 @@ uint8_t *s12_state_save(size_t *size)
 			ms.failed = 1;
 	}
 
+	if (s12.cdxa) { // the CD-XA board and its drive (other sets: no block)
+		n = s12_cdxa_state_size();
+		tmp = (uint8_t *)malloc(n);
+		if (tmp) {
+			s12_cdxa_state_save(tmp);
+			put_block(&ms, tmp, n);
+			free(tmp);
+		} else
+			ms.failed = 1;
+	}
+
 	if (ms.failed) {
 		free(ms.buf);
 		return NULL;
@@ -267,6 +279,8 @@ int s12_state_load(const uint8_t *buf, size_t size)
 		r = get_block(&ms, s12_sound_state_load, s12_sound_state_size());
 	if (!r && s12.game->state == S12_S_KARTDUEL)
 		r = get_block(&ms, s12_link_state_load, s12_link_state_size());
+	if (!r && s12.cdxa)
+		r = get_block(&ms, s12_cdxa_state_load, s12_cdxa_state_size());
 
 	events_restore();
 	psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD_STATE, NULL);

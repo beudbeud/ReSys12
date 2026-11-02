@@ -422,3 +422,26 @@ void s12_atapi_w(int reg, uint16_t v)
 	case 7: command((uint8_t)v); return;
 	}
 }
+
+uint32_t s12_atapi_state_size(void)
+{
+	return sizeof(cd);
+}
+
+void s12_atapi_state_save(void *dst)
+{
+	memcpy(dst, &cd, sizeof(cd));
+}
+
+void s12_atapi_state_load(const void *src)
+{
+	chd_file *chd = cd.chd;
+	uint8_t *hunk = cd.hunk;
+	const uint32_t frames = cd.frames, hunk_frames = cd.hunk_frames;
+	memcpy(&cd, src, sizeof(cd));
+	cd.chd = chd;
+	cd.hunk = hunk;
+	cd.frames = frames;
+	cd.hunk_frames = hunk_frames;
+	cd.cached_hunk = ~0u;
+}
