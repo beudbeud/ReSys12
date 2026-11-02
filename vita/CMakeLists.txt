@@ -56,6 +56,7 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/s12/s12_hle.c
   ${RS12_ROOT}/src/s12/s12_sound.c
   ${RS12_ROOT}/src/s12/s12_state.c
+  ${RS12_ROOT}/src/s12/s12_link.c
   ${RS12_ROOT}/src/h8/h8.c
   ${RS12_ROOT}/src/h8/h8_periph.c
   ${RS12_ROOT}/src/sound/c352.c
@@ -63,6 +64,11 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/romload/rs12_zip.c
   ${RS12_ROOT}/src/romload/junzip.c
 )
+# kartduel link CPU: src/h8 built a second time with its symbols renamed (src/h8/h8_link_names.h)
+add_library(rs12_h8link OBJECT ${RS12_ROOT}/src/h8/h8.c ${RS12_ROOT}/src/h8/h8_periph.c)
+target_compile_options(rs12_h8link PRIVATE -include ${RS12_ROOT}/src/h8/h8_link_names.h -marm)
+target_include_directories(rs12_h8link PRIVATE ${RS12_ROOT}/src/h8 ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound ${RS12_PSX_INCLUDES})
+target_sources(rs12_core PRIVATE $<TARGET_OBJECTS:rs12_h8link>)
 target_include_directories(rs12_core PUBLIC ${RS12_PSX_INCLUDES} ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound
   ${RS12_ROOT}/src/h8)
 # pcsx_rearmed's Vita shims (sys/mman.h etc.), as -Ifrontend/vita in Makefile.libretro

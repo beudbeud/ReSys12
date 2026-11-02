@@ -1,6 +1,7 @@
 // ReSys12: Namco System 12 board (main CPU side): ROM banking, ROM DMA (channel 5), shared RAM, EEPROM, KC044 protection.
 // Behaviour follows MAME src/mame/namco/namcos12.cpp (BSD-3-Clause, copyright smf and contributors).
 #include "s12.h"
+#include "s12_link.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,7 +15,7 @@
 #include "s12_hle.h"
 
 S12Board s12;
-static uint16_t s_link_ram[0x8000], s_link_regs[16]; // kartduel link board (kartduel_ram)
+static uint16_t s_link_regs[16]; // kartduel link board registers (kartduel_ram)
 
 #define BANK_SIZE 0x200000u
 
@@ -50,7 +51,7 @@ void s12_attach(S12Rom *rom)
 	(void)s_ndrc_subst;
 #endif
 	memset(&s12, 0, sizeof(s12));
-	memset(s_link_ram, 0, sizeof(s_link_ram));
+	s12_link_reset();
 	memset(s_link_regs, 0, sizeof(s_link_regs));
 	s12.rom = rom;
 	s12.game = rom->game;
@@ -258,7 +259,7 @@ void s12_dump_unmapped(void)
 static uint16_t *kartduel_ram(uint32_t a)
 {
 	if (a >= 0x1f780000u && a < 0x1f790000u)
-		return &s_link_ram[(a - 0x1f780000u) >> 1];
+		return &s12_link_ram[(a - 0x1f780000u) >> 1];
 	if (a >= 0x1f796004u && a < 0x1f79600cu)
 		return &s_link_regs[(a - 0x1f796004u) >> 1];      // 0..3
 	if (a >= 0x1f796014u && a < 0x1f796018u)
@@ -300,8 +301,14 @@ static uint16_t board_r16(uint32_t a)
 	}
 	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
 		uint16_t *r = kartduel_ram(a);
-		if (r)
+		if (r) {
+			s12_link_sync();
+#ifdef RS12_HARNESS
+			if (getenv("RS12_LINKLOG") && (a - 0x1f780000u >= 0x1000u || a >= 0x1f790000u))
+				fprintf(stderr, "main r %08x %04x pc %08x\n", a, *r, psxRegs.pc);
+#endif
 			return *r;
+		}
 	}
 	if (a >= 0x1fa00000u && a < 0x1fc00000u)
 		return bank_read16(a);
@@ -352,11 +359,18 @@ static void board_w16(uint32_t a, uint16_t d)
 	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
 		uint16_t *r = kartduel_ram(a);
 		if (r) {
+			s12_link_sync();
+#ifdef RS12_HARNESS
+			if (getenv("RS12_LINKLOG") && (a - 0x1f780000u >= 0x1000u || a >= 0x1f790000u))
+				fprintf(stderr, "main w %08x %04x pc %08x\n", a, d, psxRegs.pc);
+#endif
 			*r = d;
 			return;
 		}
-		if ((a & ~3u) == 0x1f796000u)
-			return; // link CPU reset line (the link CPU is not emulated, as MAME without a LAN peer)
+		if ((a & ~3u) == 0x1f796000u) {
+			s12_link_reset_line(a & 2);
+			return;
+		}
 	}
 	// MAME nopw: 0x1f008000, 0x1f010000, 0x1f018000, 0x1f1bff08-0f, and the program flash
 	if ((a & ~3u) == 0x1f008000u || (a & ~3u) == 0x1f010000u || (a & ~3u) == 0x1f018000u ||
@@ -391,8 +405,12 @@ void s12_write8(uint32_t phys, uint32_t v)
 {
 	// byte writes reach 16-bit devices as a word with the byte in its lane
 	const uint32_t a = phys & ~1u;
-	if (a >= 0x1f080000u && a < 0x1f084000u) {
-		uint16_t *w = &s12.shared[(a - 0x1f080000u) >> 1];
+	uint16_t *w = NULL;
+	if (a >= 0x1f080000u && a < 0x1f084000u)
+		w = &s12.shared[(a - 0x1f080000u) >> 1];
+	else if (s12.game && s12.game->state == S12_S_KARTDUEL && (w = kartduel_ram(a)) != NULL) // (memory too)
+		s12_link_sync();
+	if (w) {
 		*w = (phys & 1) ? (uint16_t)((*w & 0x00ff) | ((v & 0xff) << 8)) : (uint16_t)((*w & 0xff00) | (v & 0xff));
 		return;
 	}

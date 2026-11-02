@@ -16,11 +16,11 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
   $(PSX)/shim/rs12_psx_glue.c $(PSX)/shim/rs12_gpu_bind.c \
   $(PSX)/libpcsxcore/new_dynarec/emu_if.c \
   $(ROOT)/src/s12/s12.c $(ROOT)/src/s12/s12_sub.c $(ROOT)/src/s12/s12_jvs.c $(ROOT)/src/s12/s12_hle.c \
-  $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c \
+  $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c $(ROOT)/src/s12/s12_link.c \
   $(ROOT)/src/h8/h8.c $(ROOT)/src/h8/h8_periph.c $(ROOT)/src/sound/c352.c \
   $(ROOT)/src/romload/s12_rom.c $(ROOT)/src/romload/rs12_zip.c $(ROOT)/src/romload/junzip.c \
   $(ROOT)/src/sys/rs12_jit.c \
-  libretro.c rs12_threads_pthread.c
+  libretro.c rs12_threads_pthread.c rs12_link_udp.c
 
 DEFS := -DP_HAVE_MMAP=0 -DP_HAVE_POSIX_MEMALIGN=0 -DDISABLE_MEM_LUTS=0 -DGPU_NEON -DTEXTURE_CACHE_4BPP \
   -DTEXTURE_CACHE_8BPP -DNDEBUG -DUSE_ASYNC_GPU
@@ -52,6 +52,8 @@ endif
 
 # (object paths keep the tree: ../src/x.c -> obj/<arch>/src/x.o)
 OBJ := $(addprefix obj/$(ARCH)/,$(patsubst %.S,%.o,$(patsubst %.c,%.o,$(subst ../,,$(SRC)))))
+# kartduel link CPU: src/h8 built a second time with its symbols renamed (src/h8/h8_link_names.h)
+OBJ += obj/$(ARCH)/link/h8.o obj/$(ARCH)/link/h8_periph.o
 
 # (linked per arch, then copied: switching CC relinks)
 all: obj/$(ARCH)/$(TARGET)
@@ -69,6 +71,9 @@ obj/$(ARCH)/src/%.o: ../src/%.c
 obj/$(ARCH)/src/%.o: ../src/%.S
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<
+obj/$(ARCH)/link/%.o: ../src/h8/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -include ../src/h8/h8_link_names.h -c -o $@ $<
 obj/$(ARCH)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<

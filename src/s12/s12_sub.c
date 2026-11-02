@@ -9,6 +9,7 @@
 // Timing: the H8 runs at 16934400 Hz = main CPU clock / 2. It is caught up to the main CPU time on every PSXINT_S12
 // event (S12_SUB_QUANTUM main cycles) and on every VBLANK edge.
 #include "s12.h"
+#include "s12_link.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -443,6 +444,8 @@ void s12_pchist_dump(void)
 
 void s12_event(void)
 {
+	if (s12.game && s12.game->state == S12_S_KARTDUEL)
+		s12_link_sync();
 #ifdef RS12_SUB_PROFILE
 	// RS12_PCHIST=<frame>: sample from that frame on
 	extern unsigned int frame_counter;

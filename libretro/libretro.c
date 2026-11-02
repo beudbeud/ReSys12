@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "libretro.h"
 #include "psxcommon.h"
@@ -171,6 +172,11 @@ void retro_set_environment(retro_environment_t cb)
 	env_cb = cb;
 	bool no_game = false;
 	cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
+	static const struct retro_variable vars[] = {
+		{ "resys12_link", "Cabinet link (Kart Duel, udp port, content restart); disabled|22260|22270" },
+		{ NULL, NULL },
+	};
+	cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
 }
 void retro_set_video_refresh(retro_video_refresh_t cb) { video_cb = cb; }
 void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
@@ -236,6 +242,17 @@ bool retro_load_game(const struct retro_game_info *game)
 	s12_attach(&s_rom);
 	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
 		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
+	if (s12.game->machine == S12_M_KARTDUEL) { // network board link: core option, RS12_LINK_PORT for any other port
+		extern int rs12_link_start(uint16_t port);
+		struct retro_variable v = { "resys12_link", NULL };
+		long port = 0;
+		if (getenv("RS12_LINK_PORT"))
+			port = strtol(getenv("RS12_LINK_PORT"), NULL, 10);
+		else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
+			port = strtol(v.value, NULL, 10); // ("disabled" gives 0)
+		if (port > 0 && port < 65536 - 8 && !rs12_link_start((uint16_t)port))
+			fprintf(stderr, "ReSys12: link: no free udp port at %ld\n", port);
+	}
 
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__)
@@ -298,6 +315,10 @@ void retro_unload_game(void)
 {
 	if (!s_loaded)
 		return;
+	{
+		extern void rs12_link_stop(void);
+		rs12_link_stop();
+	}
 	GPU_close();
 	psxShutdown();
 	s12_rom_free(&s_rom);
@@ -314,6 +335,32 @@ void retro_reset(void)
 // mashes buttons from then on); RS12_DUMP_DIR + RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
 static void test_hooks(uint32_t frame)
 {
+	{ // tests: RS12_STATETEST=s,l saves a state at frame s and loads it back at frame l
+		static unsigned st_s, st_l, st_init;
+		static uint8_t *st_buf;
+		static size_t st_n;
+		if (!st_init) {
+			st_init = 1;
+			if (!getenv("RS12_STATETEST") || sscanf(getenv("RS12_STATETEST"), "%u,%u", &st_s, &st_l) != 2)
+				st_s = st_l = 0;
+		}
+		if (st_l && frame == st_s)
+			st_buf = s12_state_save(&st_n);
+		if (st_l && frame == st_l && st_buf)
+			fprintf(stderr, "ReSys12: state test: load %s\n", s12_state_load(st_buf, st_n) == 0 ? "ok" : "failed");
+	}
+	if (getenv("RS12_REALTIME")) { // tests: 60 frames a second of wall time (two linked cabinets in step)
+		static struct timespec t0;
+		struct timespec t;
+		clock_gettime(CLOCK_MONOTONIC, &t);
+		if (!frame)
+			t0 = t;
+		const int64_t due = (int64_t)frame * 1000000000 / 60, now = (int64_t)(t.tv_sec - t0.tv_sec) * 1000000000 + (t.tv_nsec - t0.tv_nsec);
+		if (due > now) {
+			const struct timespec d = { (time_t)((due - now) / 1000000000), (long)((due - now) % 1000000000) };
+			nanosleep(&d, NULL);
+		}
+	}
 	static int init, in_n, in_i;
 	static unsigned in_f[64], in_p1[64], in_sys[64];
 	static uint32_t cur_p1, cur_sys, mash_rng = 12345, mash_p1;
@@ -345,6 +392,8 @@ static void test_hooks(uint32_t frame)
 	} else
 		s12.in.player[0] |= cur_p1;
 	s12.in.system |= cur_sys;
+	if (in_n)
+		analog_input(); // (pedals and wheel from the scripted buttons)
 #ifdef RS12_HARNESS
 	{ // RS12_RAMDUMP=frame,frame,...: main RAM to <RS12_DUMP_DIR>/ram_<frame>.bin; RS12_WATCH=lo-hi[,from]: stores logged
 		static const char *rd; static int rd_init;

@@ -963,7 +963,7 @@ static void blk_run(const H8Blk *b)
 	blk_exit_end(&b->ins[b->n - 1]); // (no instruction changing PC at the end)
 }
 
-#if defined(__arm__)
+#if defined(__arm__) && !defined(H8_NO_JIT)
 #include "h8_jit_arm.inc"
 #else
 int h8_jit_enable, h8_jit_native, h8_jit_chain, h8_jit_prof, h8_jit_link, h8_jit_max;

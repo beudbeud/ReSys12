@@ -2,6 +2,7 @@
 // (RAM, hw registers, CPU registers, GPU registers + VRAM, root counters, MDEC), then the System 12 parts.
 // GPL-2.0-or-later.
 #include "s12_state.h"
+#include "s12_link.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -164,6 +165,16 @@ uint8_t *s12_state_save(size_t *size)
 		free(tmp);
 	} else
 		ms.failed = 1;
+	if (s12.game && s12.game->state == S12_S_KARTDUEL) { // the network board's CPU (other sets: no block)
+		n = s12_link_state_size();
+		tmp = (uint8_t *)malloc(n);
+		if (tmp) {
+			s12_link_state_save(tmp);
+			put_block(&ms, tmp, n);
+			free(tmp);
+		} else
+			ms.failed = 1;
+	}
 
 	if (ms.failed) {
 		free(ms.buf);
@@ -254,6 +265,8 @@ int s12_state_load(const uint8_t *buf, size_t size)
 		r = get_block(&ms, s12_sub_state_load, s12_sub_state_size());
 	if (!r)
 		r = get_block(&ms, s12_sound_state_load, s12_sound_state_size());
+	if (!r && s12.game->state == S12_S_KARTDUEL)
+		r = get_block(&ms, s12_link_state_load, s12_link_state_size());
 
 	events_restore();
 	psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD_STATE, NULL);
