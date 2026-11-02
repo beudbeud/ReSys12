@@ -264,6 +264,14 @@ bool retro_load_game(const struct retro_game_info *game)
 			port = strtol(getenv("RS12_LINK_PORT"), NULL, 10);
 		else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
 			port = strtol(v.value, NULL, 10); // ("disabled" gives 0)
+		if (port > 0) { // the lobby (sys12_comm.cfg next to the saves) pairs cabinets beyond the LAN
+			extern void rs12_link_lobby_config(const char *save_dir, const char *game, const char *user);
+			const char *save = NULL, *user = NULL;
+			if (env_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save) && save) {
+				env_cb(RETRO_ENVIRONMENT_GET_USERNAME, &user);
+				rs12_link_lobby_config(save, name, user);
+			}
+		}
 		if (port > 0 && port < 65536 - 8 && !rs12_link_start((uint16_t)port))
 			fprintf(stderr, "ReSys12: link: no free udp port at %ld\n", port);
 		struct retro_variable id = { "resys12_link_id", NULL };
@@ -459,10 +467,23 @@ static void test_hooks(uint32_t frame)
 void retro_run(void)
 {
 	static uint32_t frame;
-	if (!frame && s_link_id > 0 && s12.eeprom[0x144] != s_link_id - 1) { // Kart Duel PCB ID (after the frontend loaded the .srm)
-		s12.eeprom[0x15a] = (uint8_t)(s12.eeprom[0x15a] + s12.eeprom[0x144] - (s_link_id - 1)); // (settings check byte: NOR of a sum)
-		s12.eeprom[0x144] = (uint8_t)(s_link_id - 1);
+	extern int rs12_link_ring_id;
+	extern int rs12_link_holding(void);
+	if (!frame && rs12_link_holding()) { // (a black screen while the lobby pairs the cabinets)
+		if (getenv("RS12_REALTIME")) // tests: (the frontend's vsync paces the others)
+			nanosleep(&(struct timespec){ 0, 16666667 }, NULL);
+		video_cb(s_fb, s_fb_w, s_fb_h, s_fb_w * 2);
+		return;
 	}
+	// Kart Duel PCB ID, read by the game at boot: the lobby's cabinet number, else the core option (after the frontend
+	// loaded the .srm); ponytail: a later change of number (the master left) applies at the next start
+	static int ring_id;
+	const int id = rs12_link_ring_id > 0 ? rs12_link_ring_id : s_link_id;
+	if ((!frame || ring_id != rs12_link_ring_id) && id > 0 && s12.game->machine == S12_M_KARTDUEL && s12.eeprom[0x144] != id - 1) {
+		s12.eeprom[0x15a] = (uint8_t)(s12.eeprom[0x15a] + s12.eeprom[0x144] - (id - 1)); // (settings check byte: NOR of a sum)
+		s12.eeprom[0x144] = (uint8_t)(id - 1);
+	}
+	ring_id = rs12_link_ring_id;
 	poll_input();
 	test_hooks(frame++);
 	analog_input(); // once a frame, after the scripted buttons (the d-pad wheel ramps per call)

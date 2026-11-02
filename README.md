@@ -109,7 +109,7 @@ well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlno
 | Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Playable | as `golgo13` |
 | Techno Drive | `technodr` | 1998 | Playable | needs `namco_emio102.zip`; wheel on the left stick, R2 gas, L2 brake |
 | Attack Pla Rail | `aplarail` | 1998 | Playable | lever on the left stick |
-| Kart Duel | `kartduel`, `kartduelja` | 2000 | Playable | two cabinets race over UDP: core options `resys12_link`, `resys12_link_id` (one PCB ID each) |
+| Kart Duel | `kartduel`, `kartduelja` | 2000 | Playable | two cabinets race over UDP, on the LAN or through the Recalbox link-lobby (see section 7) |
 | Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | bad dumps, also not working in MAME |
 | Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach team select (`sws2000`) and the batting order (`sws2001`), not a match; not working in MAME |
 | Um Jammer Lammy NOW! | `ujlnow` | 1999 | Playable | CD-XA board: disc `ujlnow/ul1-a.chd` next to the zip, CD audio |
@@ -303,6 +303,12 @@ CD-XA sets (`truckk`, `ujlnow`, `questff`) read their disc as MAME does: `<romdi
 Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the same folder. Gun games read the RetroArch
 lightgun device. Kart Duel links two cabinets: core option `resys12_link` sets the UDP port, `resys12_link_id` the PCB ID (1 or 2,
 one per cabinet; restart the content after changing it).
+
+Over the internet, the cabinets meet through the Recalbox [link-lobby](https://gitlab.com/recalbox/packages/recalbox-cores/link-lobby),
+as the System 23 core does: with `resys12_link` on, a `sys12_comm.cfg` next to the saves (`lobby = host[:port]`,
+`room = name`, `nick = name`; or `RS12_LOBBY` / `RS12_ROOM` / `RS12_NICK`) sends the cabinet to that lobby. It holds
+its boot until the lobby pairs it (60 s at most, `RS12_LINK_HOLD`), then boots with the PCB ID the lobby gives (1 for
+the master, 2 for the other), so `resys12_link_id` is not needed. The cabinet identity is kept in `sys12_guid.txt`.
 
 ## 8. Project Layout
 
