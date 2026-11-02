@@ -108,7 +108,7 @@ buttons pressed, latest measurement). Some games draw fewer new pictures than th
 | Ghoul Panic / Oh! Bakyuuun | `ghlpanic`, `ohbakyuun` | 1999 | Playable | 59.94 | gun on an analog stick or touch |
 | Golgo 13 | `golgo13` | 1999 | Partial | 59.94 | the board tests its ROMs for a while after power-on |
 | Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Partial | 59.94 | as above |
-| Techno Drive | `technodr` | 1998 | Playable | 59.94 | wheel on an analog stick |
+| Techno Drive | `technodr` | 1998 | Playable | 59.94 | wheel on an analog stick; needs `namco_emio102.zip` (I/O board ROM) next to the set |
 | Attack Pla Rail | `aplarail` | 1998 | Playable | 59.94 | lever on an analog stick; the game draws 40 pictures a second |
 | Kart Duel | `kartduel`, `kartduelja` | 2000 | Partial | | no link play |
 | Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | | bad dumps, also not working in MAME |
@@ -291,6 +291,9 @@ make -C libretro CC=aarch64-linux-gnu-gcc # Raspberry Pi 5, 64-bit OS (ari64 rec
                                           # e.g. LDFLAGS=-L<dir with libz.so>
 retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
 ```
+
+Headless regression runs (RetroArch null drivers, scripted input, picture hashes): `libretro/tests/headless.py`
+(`--update` records the expected hashes; romset dir in `RS12_ROMS`).
 
 RetroPad: Y X B A L R L2 R2 = buttons 1-8, Start, Select = coin, L3 = test, R3 = service. The EEPROM is the
 core's save RAM (`.srm`); save states go through RetroArch.

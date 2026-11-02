@@ -226,8 +226,22 @@ static void load_iocpu_extra(S12Rom *r, const char *roms_dir)
 	Zip z;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/%s.zip", roms_dir, r->game->name);
-	if (!size || zip_open(&z, path) != 0)
+	if (!size)
 		return;
+	const S12RomEntry *first = &s12_roms_0260[o->rom_start];
+	while (first->region != S12_RGN_IOCPU)
+		first++;
+	Zip *owner;
+	int by_name;
+	if (zip_open(&z, path) != 0 || !find_in(&z, 1, first, &owner, &by_name)) {
+		// current MAME romsets: the ROM is in the board device's own zip (technodr: namco_emio102.zip)
+		zip_close(&z);
+		if (r->game->machine != S12_M_TECHNODR)
+			return;
+		snprintf(path, sizeof(path), "%s/namco_emio102.zip", roms_dir);
+		if (zip_open(&z, path) != 0)
+			return;
+	}
 	uint8_t *dst = (uint8_t *)calloc(1, size);
 	for (int k = 0; dst && k < o->rom_count; k++) {
 		const S12RomEntry *e = &s12_roms_0260[o->rom_start + k];
