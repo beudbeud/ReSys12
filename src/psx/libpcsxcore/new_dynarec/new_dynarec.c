@@ -5490,16 +5490,20 @@ static void drc_dbg_emit_do_cmp(struct compile_state *st, int i, int ccadj_)
         continue;
       if (!((regs[i-1].isconst >> hr) & 1))
         continue;
+#if 0 // ReSys12: write every constant out, the compare sees them all
       if (i > 1 && reg == regs[i-2].regmap[hr] && constmap[i-1][hr] == constmap[i-2][hr])
         continue;
+#endif
       emit_movimm(constmap[i-1][hr],0);
       emit_storereg(reg, 0);
     }
   }
+#if 0 // ReSys12: the trace is the state before the instruction (psxinterpreter.c RS12_TRACE)
   if (dops[i].opcode == 0x0f) { // LUI
     emit_movimm(cinfo[i].imm << 16, 0);
     emit_storereg(dops[i].rt1, 0);
   }
+#endif
   emit_movimm(st->start+i*4,0);
   emit_writeword(0,&psxRegs.pc);
   int cc = get_reg(regs[i].regmap_entry, CCREG);
@@ -5508,11 +5512,17 @@ static void drc_dbg_emit_do_cmp(struct compile_state *st, int i, int ccadj_)
   emit_addimm(cc, ccadj_, 0);
   emit_writeword(0, &psxRegs.cycle);
   emit_far_call(do_insn_cmp);
-  //emit_readword(&cycle,0);
-  //emit_addimm(0,2,0);
-  //emit_writeword(0,&cycle);
   (void)get_reg2;
   restore_regs(reglist);
+  { // ReSys12: take the interpreter's cycle count (emu_if.c do_insn_cmp), so events fall on the same instructions
+    int cc_host = get_reg(regs[i].regmap_entry, CCREG);
+    emit_readword(&psxRegs.unused, HOST_TEMPREG);
+    emit_addimm(HOST_TEMPREG, -ccadj_, HOST_TEMPREG);
+    if (cc_host >= 0)
+      emit_mov(HOST_TEMPREG, cc_host);
+    else
+      emit_storereg(CCREG, HOST_TEMPREG);
+  }
   assem_debug("\\\\do_insn_cmp\n");
 }
 static void drc_dbg_emit_wb_dirtys(int i, const struct regstat *i_regs)

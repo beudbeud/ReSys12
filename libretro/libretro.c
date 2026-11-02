@@ -7,6 +7,7 @@
 #include "libretro.h"
 #include "psxcommon.h"
 #include "r3000a.h"
+#include "psxmem.h"
 #include "plugins.h"
 #include "../src/psx/frontend/plugin_lib.h"
 #include "s12.h"
@@ -257,12 +258,14 @@ bool retro_load_game(const struct retro_game_info *game)
 		extern int h8_blk_enable;
 		h8_blk_enable = getenv("RS12_H8BLK") ? atoi(getenv("RS12_H8BLK")) : 1;
 	}
-#ifndef DRC_DISABLE
+#if !defined(DRC_DISABLE) && defined(RS12_HARNESS)
 	{ // comparisons: ReSys12 recompiler switches, as the Vita's data files (ndrcalign, nokeepsame)
 		extern int rs12_ndrc_align, rs12_ndrc_keep_same;
 		if (getenv("RS12_NDRC_ALIGN")) rs12_ndrc_align = atoi(getenv("RS12_NDRC_ALIGN"));
 		if (getenv("RS12_NOKEEPSAME")) rs12_ndrc_keep_same = 0;
 	}
+#endif
+#ifndef DRC_DISABLE
 	{ // comparisons: recompiler option bits (NDHACK_*), as the Vita's ndhacks file
 		extern struct ndrc_globals ndrc_g;
 		if (getenv("RS12_NDHACKS"))
@@ -342,6 +345,29 @@ static void test_hooks(uint32_t frame)
 	} else
 		s12.in.player[0] |= cur_p1;
 	s12.in.system |= cur_sys;
+#ifdef RS12_HARNESS
+	{ // RS12_RAMDUMP=frame,frame,...: main RAM to <RS12_DUMP_DIR>/ram_<frame>.bin; RS12_WATCH=lo-hi[,from]: stores logged
+		static const char *rd; static int rd_init;
+		if (!rd_init) {
+			rd_init = 1;
+			rd = getenv("RS12_RAMDUMP");
+			extern uint32_t rs12_watch_lo, rs12_watch_hi, rs12_watch_from;
+			const char *w = getenv("RS12_WATCH");
+			if (w && sscanf(w, "%x-%x,%u", &rs12_watch_lo, &rs12_watch_hi, &rs12_watch_from) < 2)
+				rs12_watch_lo = 1, rs12_watch_hi = 0;
+		}
+		for (const char *e = rd; e && *e; ) {
+			if ((uint32_t)strtoul(e, NULL, 10) == frame && dump_dir) {
+				char path[1200];
+				snprintf(path, sizeof(path), "%s/ram_%06u.bin", dump_dir, frame);
+				FILE *f = fopen(path, "wb");
+				if (f) { fwrite(psxRegs.ptrs.psxM, 1, PSX_RAM_SIZE, f); fclose(f); }
+			}
+			e = strchr(e, ',');
+			if (e) e++;
+		}
+	}
+#endif
 	if (dump_dir && dump_every && frame % dump_every == 0) {
 		char path[1200];
 		snprintf(path, sizeof(path), "%s/%06u.ppm", dump_dir, frame);
