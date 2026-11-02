@@ -30,6 +30,7 @@ static retro_input_state_t input_state_cb;
 volatile int rs12_rw_hit[5], rs12_rw_max[11], rs12_rw_full[6];
 
 static S12Rom s_rom;
+static int s_vertical; // the screen is turned a quarter: the picture is 3:4
 static int s_loaded;
 static S12SoundBatch *s_snd_prev;
 static int16_t s_snd_buf[S12_SOUND_MAX_FRAMES * 2];
@@ -205,7 +206,7 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 	info->geometry.base_height = 480;
 	info->geometry.max_width = FB_W;
 	info->geometry.max_height = FB_H;
-	info->geometry.aspect_ratio = 4.0f / 3.0f;
+	info->geometry.aspect_ratio = s_vertical ? 3.0f / 4.0f : 4.0f / 3.0f;
 	info->timing.fps = 53693175.0 / 263 / 3413; // PSX GPU NTSC, ~59.82 Hz (psxcounters.c FPS_FRACTIONAL_NTSC)
 	info->timing.sample_rate = S12_SOUND_RATE;
 }
@@ -240,6 +241,12 @@ bool retro_load_game(const struct retro_game_info *game)
 		return false;
 	}
 	s12_attach(&s_rom);
+	{ // MAME ROT90 / ROT270 (vertical screens); libretro counts quarter turns counter-clockwise
+		const int rot = s12_game(s12_find_game(name))->rot;
+		unsigned turns = rot == 90 ? 3 : rot == 180 ? 2 : rot == 270 ? 1 : 0;
+		env_cb(RETRO_ENVIRONMENT_SET_ROTATION, &turns);
+		s_vertical = turns & 1;
+	}
 	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
 		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
 	if (s12.game->machine == S12_M_KARTDUEL) { // network board link: core option, RS12_LINK_PORT for any other port
