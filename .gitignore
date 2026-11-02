@@ -36,3 +36,4 @@ art_psd/
 *.so
 libretro/obj/
 libretro/tests/out/
+__pycache__/
