@@ -12,6 +12,7 @@
 #include "r3000a.h"
 #include "s12_bus.h"
 #include "s12_hle.h"
+#include "s12_cdxa.h"
 
 S12Board s12;
 static uint16_t s_link_ram[0x8000], s_link_regs[16]; // kartduel link board (kartduel_ram)
@@ -58,6 +59,7 @@ void s12_attach(S12Rom *rom)
 	s12.alt_bank = (st == S12_S_ALTBANK || st == S12_S_CDXA || st == S12_S_GOLGO13 || st == S12_S_TRUCKK);
 	s12.tektagt = (st == S12_S_TEKTAGT);
 	const int m = rom->game->machine;
+	s12.cdxa = (m == S12_M_CDXA || m == S12_M_QUESTFF || m == S12_M_TRUCKK);
 	s12.boot_hack = (m == S12_M_COH700B || m == S12_M_COH716 || m == S12_M_CDXA || m == S12_M_QUESTFF ||
 		m == S12_M_GOLGO13 || m == S12_M_TRUCKK || m == S12_M_KARTDUEL);
 	s12.bank_count = rom->rgn_size[S12_RGN_BANK] / BANK_SIZE;
@@ -192,6 +194,8 @@ void s12_cpu_reset(void)
 	// MAME coh700b: "12 bytes in ram are checked early in the boot sequences, how it gets into memory is not currently known"
 	if (s12.boot_hack && s12.rom && s12.rom->rgn[S12_RGN_MAIN])
 		memcpy(psxRegs.ptrs.psxM + 0x10000, s12.rom->rgn[S12_RGN_MAIN] + 0x20280, 12);
+	if (s12.cdxa)
+		s12_cdxa_reset();
 	s12_sub_reset();
 }
 
@@ -273,6 +277,9 @@ static uint16_t *kartduel_ram(uint32_t a)
 // ---- 16-bit bus (everything on the System 12 expansion bus is 16 bits wide in MAME) ----
 static uint16_t board_r16(uint32_t a)
 {
+	uint16_t cv;
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f800000u && s12_cdxa_r16(a, &cv))
+		return cv;
 	if (a >= 0x1f080000u && a < 0x1f084000u)
 		return s12.shared[(a - 0x1f080000u) >> 1];
 	if (a >= 0x1f140000u && a < 0x1f141000u) {
@@ -319,6 +326,8 @@ static void board_w16(uint32_t a, uint16_t d)
 		bankoffset_w(d);
 		return;
 	}
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f800000u && s12_cdxa_w16(a, d))
+		return;
 	if (a >= 0x1f080000u && a < 0x1f084000u) {
 		s12.shared[(a - 0x1f080000u) >> 1] = d;
 		return;
@@ -394,6 +403,10 @@ void s12_write8(uint32_t phys, uint32_t v)
 	if (a >= 0x1f080000u && a < 0x1f084000u) {
 		uint16_t *w = &s12.shared[(a - 0x1f080000u) >> 1];
 		*w = (phys & 1) ? (uint16_t)((*w & 0x00ff) | ((v & 0xff) << 8)) : (uint16_t)((*w & 0xff00) | (v & 0xff));
+		return;
+	}
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f7d0000u) {
+		s12_cdxa_w8(phys, (uint8_t)v);
 		return;
 	}
 	board_w16(a, (uint16_t)((phys & 1) ? (v & 0xff) << 8 : (v & 0xff)));
@@ -554,7 +567,10 @@ void s12_set_lever(float v)
 // ---- inputs as the H8 sees them (MAME in_r, JAMMA mode) ----
 uint8_t s12_in_r(int offset)
 {
-	const uint32_t p1 = s12.in.player[0], p2 = s12.in.player[1];
+	uint32_t p1 = s12.in.player[0], p2 = s12.in.player[1];
+	// MAME ujlnow inputs: P2 UP and DOWN are active low on that cabinet ("must be pressed to get rid of I/O errors")
+	if (s12.game && !strcmp(s12.game->name, "ujlnow"))
+		p2 |= S12_IN_UP | S12_IN_DOWN;
 	uint8_t v = 0;
 	switch (offset) {
 	case 0:

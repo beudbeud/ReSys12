@@ -16,7 +16,8 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
   $(PSX)/shim/rs12_psx_glue.c $(PSX)/shim/rs12_gpu_bind.c \
   $(PSX)/libpcsxcore/new_dynarec/emu_if.c \
   $(ROOT)/src/s12/s12.c $(ROOT)/src/s12/s12_sub.c $(ROOT)/src/s12/s12_jvs.c $(ROOT)/src/s12/s12_hle.c \
-  $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c \
+  $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c $(ROOT)/src/s12/s12_cdxa.c $(ROOT)/src/s12/s12_atapi.c $(ROOT)/src/sh2/sh2.c \
+  $(ROOT)/deps/libchdr/unity.c \
   $(ROOT)/src/h8/h8.c $(ROOT)/src/h8/h8_periph.c $(ROOT)/src/sound/c352.c \
   $(ROOT)/src/romload/s12_rom.c $(ROOT)/src/romload/rs12_zip.c $(ROOT)/src/romload/junzip.c \
   $(ROOT)/src/sys/rs12_jit.c \
@@ -25,7 +26,7 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
 DEFS := -DP_HAVE_MMAP=0 -DP_HAVE_POSIX_MEMALIGN=0 -DDISABLE_MEM_LUTS=0 -DGPU_NEON -DTEXTURE_CACHE_4BPP \
   -DTEXTURE_CACHE_8BPP -DNDEBUG -DUSE_ASYNC_GPU
 INC := -I$(PSX)/libpcsxcore -I$(PSX)/include -I$(PSX)/shim -I$(ROOT)/src/s12 -I$(ROOT)/src/romload \
-  -I$(ROOT)/src/sound -I$(ROOT)/src/h8 -I$(ROOT)/src/sys -I.
+  -I$(ROOT)/src/sound -I$(ROOT)/src/h8 -I$(ROOT)/src/sys -I$(ROOT)/src/sh2 -I$(ROOT)/deps/libchdr/include -I.
 CFLAGS ?= -O3 -ffast-math
 CFLAGS += $(EXTRA_CFLAGS) -fPIC -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
   -fno-optimize-sibling-calls -fno-strict-aliasing $(DEFS) $(INC)
@@ -63,6 +64,11 @@ obj/$(ARCH)/$(TARGET): $(OBJ)
 obj/$(ARCH)/src/psx/plugins/gpu_neon/psx_gpu_if.o: CFLAGS += $(GPU_IF_FLAGS)
 obj/$(ARCH)/src/psx/plugins/gpu_neon/psx_gpu/psx_gpu_simd.o: CFLAGS += $(GPU_IF_FLAGS)
 
+CHDR := $(ROOT)/deps/libchdr
+obj/$(ARCH)/deps/libchdr/unity.o: CFLAGS += -DZ7_ST -I$(CHDR)/deps/lzma-25.01/include -I$(CHDR)/deps/zstd-1.5.7 -I$(CHDR)/deps/miniz-3.1.1 -w
+obj/$(ARCH)/deps/%.o: ../deps/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
 obj/$(ARCH)/src/%.o: ../src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c -o $@ $<

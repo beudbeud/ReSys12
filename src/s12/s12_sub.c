@@ -8,6 +8,7 @@
 // JVS: the I/O boards of aplarail / technodr / questff on SCI0 (s12_jvs.c); the other sets have none (sense = None).
 // Timing: the H8 runs at 16934400 Hz = main CPU clock / 2. It is caught up to the main CPU time on every PSXINT_S12
 // event (S12_SUB_QUANTUM main cycles) and on every VBLANK edge.
+#include "s12_cdxa.h"
 #include "s12.h"
 
 #include <stdio.h>
@@ -328,6 +329,8 @@ static void catch_up(void)
 		if (sub.jvs.tx_pos < sub.jvs.tx_len)
 			s12_jvs_update(&sub.jvs, h8_total_cycles());
 	}
+	if (s12.cdxa)
+		s12_cdxa_run(now);
 }
 
 // C352 key-on: the wave ROM may still be read in the background (Vita ROM cache, s12_rom.c)

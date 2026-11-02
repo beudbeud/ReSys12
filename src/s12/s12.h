@@ -41,7 +41,7 @@ typedef struct {
 	uint32_t dmaoffset;
 	uint16_t bankoffset;
 	uint32_t bank_entry, bank_count;
-	int alt_bank, boot_hack, tektagt;
+	int alt_bank, boot_hack, tektagt, cdxa;
 	// tektagt protection (KC044)
 	int has_tektagt_dma;
 	uint32_t tektagdmaoffset;
