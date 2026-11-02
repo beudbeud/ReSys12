@@ -27,7 +27,7 @@ DEFS := -DP_HAVE_MMAP=0 -DP_HAVE_POSIX_MEMALIGN=0 -DDISABLE_MEM_LUTS=0 -DGPU_NEO
 INC := -I$(PSX)/libpcsxcore -I$(PSX)/include -I$(PSX)/shim -I$(ROOT)/src/s12 -I$(ROOT)/src/romload \
   -I$(ROOT)/src/sound -I$(ROOT)/src/h8 -I$(ROOT)/src/sys -I.
 CFLAGS ?= -O3 -ffast-math
-CFLAGS += -fPIC -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
+CFLAGS += $(EXTRA_CFLAGS) -fPIC -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
   -fno-optimize-sibling-calls -fno-strict-aliasing $(DEFS) $(INC)
 GPU_IF_FLAGS := -DNEON_BUILD
 
@@ -53,9 +53,11 @@ endif
 # (object paths keep the tree: ../src/x.c -> obj/<arch>/src/x.o)
 OBJ := $(addprefix obj/$(ARCH)/,$(patsubst %.S,%.o,$(patsubst %.c,%.o,$(subst ../,,$(SRC)))))
 
-all: $(TARGET)
+# (linked per arch, then copied: switching CC relinks)
+all: obj/$(ARCH)/$(TARGET)
+	cp $< $(TARGET)
 
-$(TARGET): $(OBJ)
+obj/$(ARCH)/$(TARGET): $(OBJ)
 	$(CC) -shared -o $@ $^ $(LDFLAGS) -Wl,--version-script=link.T -Wl,--no-undefined -lpthread -lm -lz
 
 obj/$(ARCH)/src/psx/plugins/gpu_neon/psx_gpu_if.o: CFLAGS += $(GPU_IF_FLAGS)

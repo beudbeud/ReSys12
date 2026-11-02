@@ -35,3 +35,4 @@ art_psd/
 *.psd
 *.so
 libretro/obj/
+libretro/tests/out/

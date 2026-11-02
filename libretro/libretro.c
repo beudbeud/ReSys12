@@ -13,6 +13,7 @@
 #include "s12_rom.h"
 #include "s12_state.h"
 #include "s12_sound.h"
+#include "new_dynarec/new_dynarec.h"
 
 extern void rs12_psx_bind(void);
 extern void (*rs12_GPUrearmedCallbacks)(const struct rearmed_cbs *);
@@ -80,6 +81,64 @@ static const struct { unsigned id; uint32_t bit; } k_map[] = {
 	{ RETRO_DEVICE_ID_JOYPAD_START, S12_IN_START }, { RETRO_DEVICE_ID_JOYPAD_R3, S12_IN_SERVICE },
 };
 
+// gun games: a lightgun (or the mouse RetroArch shows as one) aims, the left stick aims where it points; the trigger
+// is button 1 (Golgo 13: button 2, scope sensor = aux A). Wheel games: left stick X or d-pad steers, R2 gas, L2 brake.
+// Lever games: left stick Y
+static int16_t in_st(unsigned pl, unsigned dev, unsigned idx, unsigned id) { return input_state_cb(pl, dev, idx, id); }
+static float stick(unsigned pl, unsigned id)
+{
+	const float a = in_st(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, id) / 32767.0f;
+	return a > -0.08f && a < 0.08f ? 0.0f : a > 1.0f ? 1.0f : a;
+}
+static float clamp01(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+
+static void analog_input(void)
+{
+	const int kind = s12_analog_kind(s12.game);
+	if (kind == S12_ANALOG_GUN) {
+		static float gx[2] = { 0.5f, 0.5f }, gy[2] = { 0.5f, 0.5f };
+		const int golgo = s12.game->state == S12_S_GOLGO13;
+		for (unsigned pl = 0; pl < 2; pl++) {
+			const float sx = stick(pl, RETRO_DEVICE_ID_ANALOG_X), sy = stick(pl, RETRO_DEVICE_ID_ANALOG_Y);
+			if (sx != 0.0f || sy != 0.0f) {
+				gx[pl] = clamp01(0.5f + sx * 0.55f);
+				gy[pl] = clamp01(0.5f + sy * 0.55f);
+			} else if (!in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN)) {
+				const int lx = in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+				const int ly = in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
+				if (lx || ly) { // (0,0 = no gun input)
+					gx[pl] = (lx + 32768) / 65535.0f;
+					gy[pl] = (ly + 32768) / 65535.0f;
+				}
+			}
+			s12_set_gun(pl, gx[pl], gy[pl]);
+			if (in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER))
+				s12.in.player[pl] |= golgo ? S12_IN_B2 : S12_IN_B1;
+			if (golgo && in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A))
+				s12.in.player[pl] |= S12_IN_B7;
+			if (in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START))
+				s12.in.player[pl] |= S12_IN_START;
+			if (in_st(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SELECT))
+				s12.in.system |= pl ? S12_SYS_COIN2 : S12_SYS_COIN1;
+		}
+	} else if (kind == S12_ANALOG_WHEEL) {
+		// d-pad: full lock in 1/4 s, back to centre when released; the stick adds
+		static float dsteer;
+		const uint32_t p = s12.in.player[0];
+		if (p & S12_IN_LEFT)
+			dsteer = dsteer > -1.0f ? dsteer - 0.07f : -1.0f;
+		else if (p & S12_IN_RIGHT)
+			dsteer = dsteer < 1.0f ? dsteer + 0.07f : 1.0f;
+		else
+			dsteer = dsteer > 0.1f ? dsteer - 0.1f : dsteer < -0.1f ? dsteer + 0.1f : 0.0f;
+		float steer = stick(0, RETRO_DEVICE_ID_ANALOG_X) + dsteer;
+		steer = steer < -1.0f ? -1.0f : steer > 1.0f ? 1.0f : steer;
+		s12_set_wheel(steer, (p & S12_IN_B8) ? 1.0f : 0.0f, (p & S12_IN_B7) ? 1.0f : 0.0f);
+	} else if (kind == S12_ANALOG_LEVER) {
+		s12_set_lever(-stick(0, RETRO_DEVICE_ID_ANALOG_Y));
+	}
+}
+
 static void poll_input(void)
 {
 	input_poll_cb();
@@ -102,6 +161,7 @@ static void poll_input(void)
 	if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3))
 		sys |= S12_SYS_TEST;
 	s12.in.system = sys;
+	analog_input();
 }
 
 // ---- libretro ----
@@ -173,6 +233,8 @@ bool retro_load_game(const struct retro_game_info *game)
 		return false;
 	}
 	s12_attach(&s_rom);
+	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
+		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
 
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__)
@@ -181,6 +243,8 @@ bool retro_load_game(const struct retro_game_info *game)
 	Config.Cpu = CPU_INTERPRETER;
 #endif
 	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
+	if (getenv("RS12_CYCLE_MULT")) // comparisons
+		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
 
 	pl_rearmed_cbs.pl_vout_open = vout_open;
 	pl_rearmed_cbs.pl_vout_close = vout_close;
@@ -189,6 +253,22 @@ bool retro_load_game(const struct retro_game_info *game)
 	pl_rearmed_cbs.gpu_neon.allow_interlace = 2;
 	pl_rearmed_cbs.thread_rendering = 0; // ponytail: rendering on the emulation thread; gpu_async if a Pi 5 needs it
 
+	{ // comparisons (as the PC harness): RS12_H8BLK=0 runs the H8 instruction by instruction
+		extern int h8_blk_enable;
+		h8_blk_enable = getenv("RS12_H8BLK") ? atoi(getenv("RS12_H8BLK")) : 1;
+	}
+#ifndef DRC_DISABLE
+	{ // comparisons: ReSys12 recompiler switches, as the Vita's data files (ndrcalign, nokeepsame)
+		extern int rs12_ndrc_align, rs12_ndrc_keep_same;
+		if (getenv("RS12_NDRC_ALIGN")) rs12_ndrc_align = atoi(getenv("RS12_NDRC_ALIGN"));
+		if (getenv("RS12_NOKEEPSAME")) rs12_ndrc_keep_same = 0;
+	}
+	{ // comparisons: recompiler option bits (NDHACK_*), as the Vita's ndhacks file
+		extern struct ndrc_globals ndrc_g;
+		if (getenv("RS12_NDHACKS"))
+			ndrc_g.hacks = (int)strtol(getenv("RS12_NDHACKS"), NULL, 0);
+	}
+#endif
 	rs12_psx_bind();
 	if (psxInit() != 0) {
 		fprintf(stderr, "ReSys12: psxInit failed\n");
@@ -227,9 +307,62 @@ void retro_reset(void)
 		psxReset();
 }
 
+// ---- test hooks (headless runs): RS12_INPUT="frame:p1hex:syshex,..." as the Vita's input.txt (a P1 mask 0xfffff
+// mashes buttons from then on); RS12_DUMP_DIR + RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
+static void test_hooks(uint32_t frame)
+{
+	static int init, in_n, in_i;
+	static unsigned in_f[64], in_p1[64], in_sys[64];
+	static uint32_t cur_p1, cur_sys, mash_rng = 12345, mash_p1;
+	static const char *dump_dir;
+	static int dump_every;
+	if (!init) {
+		init = 1;
+		const char *e = getenv("RS12_INPUT");
+		while (e && in_n < 64 && sscanf(e, " %u:%x:%x", &in_f[in_n], &in_p1[in_n], &in_sys[in_n]) == 3) {
+			in_n++;
+			e = strchr(e, ',');
+			if (e)
+				e++;
+		}
+		dump_dir = getenv("RS12_DUMP_DIR");
+		dump_every = getenv("RS12_DUMP_EVERY") ? atoi(getenv("RS12_DUMP_EVERY")) : 0;
+	}
+	while (in_i < in_n && frame >= in_f[in_i]) {
+		cur_p1 = in_p1[in_i];
+		cur_sys = in_sys[in_i];
+		in_i++;
+	}
+	if (cur_p1 == 0xfffff) {
+		if (frame % 6 == 0) {
+			mash_rng = mash_rng * 1103515245u + 12345u;
+			mash_p1 = (mash_rng >> 8) & 0x3ff & ~(uint32_t)0x3;
+		}
+		s12.in.player[0] |= (frame % 6) < 4 ? mash_p1 : 0;
+	} else
+		s12.in.player[0] |= cur_p1;
+	s12.in.system |= cur_sys;
+	if (dump_dir && dump_every && frame % dump_every == 0) {
+		char path[1200];
+		snprintf(path, sizeof(path), "%s/%06u.ppm", dump_dir, frame);
+		FILE *f = fopen(path, "wb");
+		if (f) {
+			fprintf(f, "P6\n%d %d\n255\n", s_fb_w, s_fb_h);
+			for (int i = 0; i < s_fb_w * s_fb_h; i++) {
+				const uint16_t p = s_fb[i];
+				const uint8_t rgb[3] = { (uint8_t)((p >> 11) << 3), (uint8_t)((p >> 5 & 0x3f) << 2), (uint8_t)((p & 0x1f) << 3) };
+				fwrite(rgb, 1, 3, f);
+			}
+			fclose(f);
+		}
+	}
+}
+
 void retro_run(void)
 {
+	static uint32_t frame;
 	poll_input();
+	test_hooks(frame++);
 	psxRegs.stop = 0;
 	psxCpu->Execute(&psxRegs);
 	S12SoundBatch *b = s12_sub_sound_frame(s_snd_prev);
