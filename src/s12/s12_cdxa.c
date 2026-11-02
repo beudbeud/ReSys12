@@ -560,6 +560,16 @@ void s12_cdxa_run(uint32_t main_cycles)
 	}
 }
 
+#ifdef RS12_HARNESS
+// comparisons: board RAMs (C448 SRAM then the SRAM behind it) next to the main RAM dumps
+void s12_cdxa_dump(FILE *f)
+{
+	fwrite(cd.cram, 1, sizeof(cd.cram), f);
+	fwrite(cd.sram, 1, sizeof(cd.sram), f);
+	fwrite(&cd.cpu, 1, sizeof(cd.cpu), f); // r0-r15, pc, pr, ... as sh2.h
+}
+#endif
+
 int s12_cdxa_audio(int16_t *out, int max_frames)
 {
 	const int n = cd.audio_n < max_frames ? cd.audio_n : max_frames;

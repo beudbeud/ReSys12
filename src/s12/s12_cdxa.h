@@ -18,5 +18,9 @@ void s12_cdxa_run(uint32_t main_cycles);
 // CD audio of the last frame as interleaved stereo at S12_CDXA_RATE, mixed by the frontend; returns sample pairs
 #define S12_CDXA_RATE 37800
 int s12_cdxa_audio(int16_t *out, int max_frames);
+#ifdef RS12_HARNESS
+#include <stdio.h>
+void s12_cdxa_dump(FILE *f);
+#endif
 
 #endif

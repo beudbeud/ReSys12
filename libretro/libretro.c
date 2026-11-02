@@ -266,12 +266,13 @@ bool retro_load_game(const struct retro_game_info *game)
 
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__)
-	// ponytail: CD-XA sets go black after boot under the recompiler (C448 window path), interpreter until that is traced
-	Config.Cpu = getenv("RS12_INTERP") || s12.cdxa ? CPU_INTERPRETER : CPU_DYNAREC;
+	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
 #else
 	Config.Cpu = CPU_INTERPRETER;
 #endif
-	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
+	// CD-XA sets keep the interpreter's rate: at 120 the library VSync timeout loop (32768 x 14 instructions) is shorter
+	// than a frame, so full-frame waits time out and the boot handshake with the SH2 (768 VSyncs) expires too soon
+	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC && !s12.cdxa ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
 	if (getenv("RS12_CYCLE_MULT")) // comparisons
 		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
 
@@ -425,7 +426,7 @@ static void test_hooks(uint32_t frame)
 				char path[1200];
 				snprintf(path, sizeof(path), "%s/ram_%06u.bin", dump_dir, frame);
 				FILE *f = fopen(path, "wb");
-				if (f) { fwrite(psxRegs.ptrs.psxM, 1, PSX_RAM_SIZE, f); fclose(f); }
+				if (f) { fwrite(psxRegs.ptrs.psxM, 1, PSX_RAM_SIZE, f); if (s12.cdxa) s12_cdxa_dump(f); fclose(f); }
 			}
 			e = strchr(e, ',');
 			if (e) e++;
