@@ -113,7 +113,7 @@ well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlno
 | Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | bad dumps, also not working in MAME |
 | Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach team select (`sws2000`) and the batting order (`sws2001`), not a match; not working in MAME |
 | Um Jammer Lammy NOW! | `ujlnow` | 1999 | Playable | CD-XA board: disc `ujlnow/ul1-a.chd` next to the zip, CD audio |
-| Truck Kyosokyoku | `truckk` | 2000 | Partial | boots from `truckk/tkk2-a.chd` to the title; its I/O CPU (H8/3334) is not emulated, so the horn button that starts a game is not read |
+| Truck Kyosokyoku | `truckk` | 2000 | Playable | disc `truckk/tkk2-a.chd`; 2 coins, then the horn (button 3, RetroPad B) starts a game; R2 gas, L2 brake |
 | Quest for Fame | `questff` | 1999 | Untested | CD-XA board; no dump here |
 
 ## 4. Download
