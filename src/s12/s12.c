@@ -197,6 +197,8 @@ void s12_cpu_reset(void)
 		memcpy(psxRegs.ptrs.psxM + 0x10000, s12.rom->rgn[S12_RGN_MAIN] + 0x20280, 12);
 	if (s12.cdxa)
 		s12_cdxa_reset();
+	s12_link_reset(); // (its CPU held in reset: a running one would catch up the main CPU's cycle count from before)
+	memset(s_link_regs, 0, sizeof(s_link_regs));
 	s12_sub_reset();
 }
 

@@ -198,6 +198,8 @@ void s12_link_reset(void)
 	memset(s_net_ram, 0, sizeof(s_net_ram));
 	s_rx_index = s_tx_index = 0;
 	s_irq = s_trailer = 0;
+	s_rx_ready = 0;
+	s_rxq_n = 0;
 	s_tx_pending = 0;
 	s_running = 0;
 	h8_set_rom(NULL, 0);
