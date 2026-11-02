@@ -3579,6 +3579,15 @@ static void load_assemble(struct compile_state *st, int i,
   int c = 0, offset_reg = -1, is_dummy;
   u_int saddr_likely = 0;
   u_int saddr_const = resolve_const_io(i, i_regs, &c, &saddr_likely);
+  // ReSys12: the ROM bank windows (s12.c map_bank: 0x1fa00000-0x1fbfffff, and 0x1ff00000-0x1ff7ffff) are remapped
+  // while the game runs (psxMemMapRead). A load from a constant address would bake the host pointer of the bank
+  // mapped at compile time (inline_readstub); it has to look the mapping up when it runs, as a variable address does
+  // (ptblank2 switches banks with "lui v0,0x1fa0; lw v0,0(v0)" and waits for the new bank's marker: black stage select)
+  if (c) {
+    const u_int p = saddr_const & 0x1fffffffu;
+    if ((p >= 0x1fa00000u && p < 0x1fc00000u) || (p >= 0x1ff00000u && p < 0x1ff80000u))
+      c = 0;
+  }
   int ram80x_io = (signed int)saddr_const < (signed int)(0x80000000 + RAM_SIZE);
   int inline_slow_io = saddr_likely != 0;
   u_int reglist = get_host_reglist(i_regs->regmap);
