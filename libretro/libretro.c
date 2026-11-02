@@ -15,6 +15,7 @@
 #include "s12_rom.h"
 #include "s12_state.h"
 #include "s12_sound.h"
+#include "s12_cdxa.h"
 #include "new_dynarec/new_dynarec.h"
 
 extern void rs12_psx_bind(void);
@@ -247,6 +248,8 @@ bool retro_load_game(const struct retro_game_info *game)
 		env_cb(RETRO_ENVIRONMENT_SET_ROTATION, &turns);
 		s_vertical = turns & 1;
 	}
+	if (s12.cdxa && s12_cdxa_open_disc(dir, name) != 0)
+		fprintf(stderr, "ReSys12: %s: disc image %s/%s/*.chd not found (MAME layout)\n", name, dir, name);
 	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
 		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
 	if (s12.game->machine == S12_M_KARTDUEL) { // network board link: core option, RS12_LINK_PORT for any other port
@@ -263,7 +266,8 @@ bool retro_load_game(const struct retro_game_info *game)
 
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__)
-	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
+	// ponytail: CD-XA sets go black after boot under the recompiler (C448 window path), interpreter until that is traced
+	Config.Cpu = getenv("RS12_INTERP") || s12.cdxa ? CPU_INTERPRETER : CPU_DYNAREC;
 #else
 	Config.Cpu = CPU_INTERPRETER;
 #endif
@@ -326,6 +330,10 @@ void retro_unload_game(void)
 		extern void rs12_link_stop(void);
 		rs12_link_stop();
 	}
+#ifdef RS12_HARNESS
+	if (getenv("RS12_UNMAPPED")) // diagnostics: distinct unhandled board addresses
+		s12_dump_unmapped();
+#endif
 	GPU_close();
 	psxShutdown();
 	s12_rom_free(&s_rom);
@@ -440,6 +448,36 @@ static void test_hooks(uint32_t frame)
 	}
 }
 
+// CDXA board audio (37800 Hz) mixed into the C352 frame at 0.30 as MAME's routing. The frame's CD samples are stretched
+// over the frame's C352 samples (ponytail: per-frame linear stretch; a running resampler if the pitch wobble is heard)
+static void mix_cd_audio(int n)
+{
+	static int16_t cdbuf[4096 * 2];
+	const int m = s12_cdxa_audio(cdbuf, 4096);
+	if (m <= 0)
+		return;
+#ifdef RS12_HARNESS
+	static FILE *raw;
+	static int raw_init;
+	if (!raw_init) { // diagnostics: RS12_CDRAW=file gets the CD audio alone (s16 stereo at 37800 Hz)
+		raw_init = 1;
+		if (getenv("RS12_CDRAW"))
+			raw = fopen(getenv("RS12_CDRAW"), "wb");
+	}
+	if (raw)
+		fwrite(cdbuf, 4, (size_t)m, raw);
+#endif
+	for (int i = 0; i < n; i++) {
+		const int64_t pos = (int64_t)i * m * 256 / n; // 8 bits of fraction
+		const int j = (int)(pos >> 8), f = (int)(pos & 255), k = j + 1 < m ? j + 1 : j;
+		for (int c = 0; c < 2; c++) {
+			const int cdv = (cdbuf[j * 2 + c] * (256 - f) + cdbuf[k * 2 + c] * f) >> 8;
+			int v = s_snd_buf[i * 2 + c] + cdv * 3 / 10;
+			s_snd_buf[i * 2 + c] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+		}
+	}
+}
+
 void retro_run(void)
 {
 	static uint32_t frame;
@@ -450,6 +488,8 @@ void retro_run(void)
 	S12SoundBatch *b = s12_sub_sound_frame(s_snd_prev);
 	const int n = s12_sound_render(b, s_snd_buf);
 	s_snd_prev = b;
+	if (n > 0 && s12.cdxa)
+		mix_cd_audio(n);
 	if (n > 0)
 		audio_batch_cb(s_snd_buf, (size_t)n);
 	video_cb(s_fb, s_fb_w, s_fb_h, s_fb_w * 2);
