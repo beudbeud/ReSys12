@@ -46,7 +46,8 @@ def run_set(name, frames, every, script):
         f.write('video_driver = "null"\naudio_driver = "null"\nvideo_vsync = "false"\naudio_sync = "false"\n'
                 'input_driver = "null"\ninput_joypad_driver = "null"\nmidi_driver = "null"\n'
                 'savefile_directory = "%s"\nsavestate_directory = "%s"\n' % (OUT, OUT))
-    env = dict(os.environ, RS12_INPUT=script, RS12_DUMP_DIR=dump, RS12_DUMP_EVERY=str(every))
+    # fixed RTC4543 time: games show the date and seed RNGs from it
+    env = dict(os.environ, RS12_INPUT=script, RS12_DUMP_DIR=dump, RS12_DUMP_EVERY=str(every), RS12_RTC="1762080000")
     log = os.path.join(OUT, name + ".log")
     with open(log, "w") as lf:
         rc = subprocess.call([RETROARCH, "--appendconfig", cfg, "-L", CORE, os.path.join(ROMS, name + ".zip"),
