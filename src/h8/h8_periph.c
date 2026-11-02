@@ -7,11 +7,13 @@
 // Implemented: internal RAM, SYSCR, INTC (h8.c), ITU channels 0-4 (TSTR, TCR, TIER, TSR, TCNT, GRA/B, BRA/B),
 // SCI0/SCI1 (async + clocked sync, internal clock; bit-level as MAME), ports 4/6/7/8/9/A/B, ADC, watchdog, refresh timer.
 // MAME no-ops kept as no-ops (logged once): TSYR, TMDR, TFCR, TOER, TOCR, TIOR, port 4 PCR, watchdog RSTCSR writes.
-// Not implemented (logged once): DMAC (0xffff20-0xffff3f) and anything outside the MAME map.
+// DMAC (0xffff20-0xffff3f): full address mode with auto-request only (kartduel's link CPU), each transfer done at once
+// when DTE is set. Not implemented (logged once): anything else outside the MAME map.
 #include "h8_int.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #define COMBINE(dst, data, mask) ((dst) = (uint16_t)(((dst) & ~(mask)) | ((data) & (mask))))
 
@@ -1123,6 +1125,7 @@ void h8_periph_reset(int power_on)
 	h8.ref.rtmcsr = 0;
 	h8.ref.cycle_base = h8_now();
 	tstr_w(0xe0); // default TSTR (channels stopped)
+	memset(h8_dmac, 0, sizeof(h8_dmac));
 	h8.in_update = 0;
 }
 
@@ -1314,10 +1317,58 @@ static void reg8_write(uint32_t a, uint8_t d)
 
 static inline int is_iram(uint32_t a) { return a >= 0xfffd10 && a < 0xffff10; }
 
+// ---- DMAC: registers per channel (MAR A, ETCR A, IOAR A, DTCR A, then the B set); outside H8State (only the link CPU uses it)
+// ponytail: a transfer runs whole and costs no states; short/IO modes and its interrupt when a firmware needs them
+uint8_t h8_dmac[0x20];
+
+static void dmac_start(int ch)
+{
+	uint8_t *r = &h8_dmac[ch * 0x10];
+	const uint8_t dtcra = r[7], dtcrb = r[0xf];
+	if ((dtcra & 6) != 6 || !(dtcrb & 0x80) || (dtcrb & 6) || (dtcra & 8)) { // full address, auto-request, no DTIE
+		h8_note_unimplemented(0xffff27 + ch * 0x10, 1);
+		return;
+	}
+	const int size = (dtcra & 0x40) ? 2 : 1;
+	const int sstep = (dtcra & 0x10) ? ((dtcra & 0x20) ? -size : size) : 0;
+	const int dstep = (dtcrb & 0x10) ? ((dtcrb & 0x20) ? -size : size) : 0;
+	uint32_t src = (uint32_t)r[1] << 16 | r[2] << 8 | r[3], dst = (uint32_t)r[9] << 16 | r[10] << 8 | r[11];
+	uint32_t n = (uint32_t)(r[4] << 8 | r[5]);
+	if (!n)
+		n = 0x10000;
+#ifdef RS12_HARNESS
+	if (getenv("RS12_DMACLOG"))
+		fprintf(stderr, "dmac%d %06x -> %06x n %u size %d dtcr %02x %02x pc %06x\n", ch, src, dst, n, size, dtcra, dtcrb, h8.PPC);
+#endif
+	for (; n; n--, src += (uint32_t)sstep, dst += (uint32_t)dstep) {
+		if (size == 2)
+			h8_bus_write16(dst & 0xffffff, h8_bus_read16(src & 0xffffff));
+		else
+			h8_bus_write8(dst & 0xffffff, h8_bus_read8(src & 0xffffff));
+	}
+	r[1] = (uint8_t)(src >> 16), r[2] = (uint8_t)(src >> 8), r[3] = (uint8_t)src;
+	r[9] = (uint8_t)(dst >> 16), r[10] = (uint8_t)(dst >> 8), r[11] = (uint8_t)dst;
+	r[4] = r[5] = 0;
+	r[7] &= 0x7f; // DTE
+}
+
+static void dmac_w(uint32_t a, uint8_t d)
+{
+	const uint32_t o = a - 0xffff20;
+	const uint8_t old = h8_dmac[o];
+	h8_dmac[o] = d;
+	if ((o & 0xf) == 7 && (d & 0x80) && !(old & 0x80))
+		dmac_start((int)(o >> 4));
+}
+
+static inline int ih8_dmac(uint32_t a) { return a >= 0xffff20 && a < 0xffff40; }
+
 uint8_t h8_onchip_read8(uint32_t a)
 {
 	if (is_iram(a))
 		return h8.iram[a - 0xfffd10];
+	if (ih8_dmac(a))
+		return h8_dmac[a - 0xffff20];
 	if (a < 0xffff20) {
 		h8_note_unimplemented(a, 0);
 		return 0;
@@ -1332,6 +1383,8 @@ uint16_t h8_onchip_read16(uint32_t a)
 {
 	if (is_iram(a))
 		return (uint16_t)(h8.iram[a - 0xfffd10] << 8 | h8.iram[a - 0xfffd10 + 1]);
+	if (ih8_dmac(a))
+		return (uint16_t)(h8_dmac[a - 0xffff20] << 8 | h8_dmac[a - 0xffff20 + 1]);
 	if (a < 0xffff20) {
 		h8_note_unimplemented(a, 0);
 		return 0;
@@ -1349,6 +1402,10 @@ void h8_onchip_write8(uint32_t a, uint8_t d)
 		h8.iram[a - 0xfffd10] = d;
 		return;
 	}
+	if (ih8_dmac(a)) {
+		dmac_w(a, d);
+		return;
+	}
 	if (a < 0xffff20) {
 		h8_note_unimplemented(a, 1);
 		return;
@@ -1363,6 +1420,11 @@ void h8_onchip_write16(uint32_t a, uint16_t d)
 	if (is_iram(a)) {
 		h8.iram[a - 0xfffd10] = (uint8_t)(d >> 8);
 		h8.iram[a - 0xfffd10 + 1] = (uint8_t)d;
+		return;
+	}
+	if (ih8_dmac(a)) {
+		dmac_w(a, (uint8_t)(d >> 8));
+		dmac_w(a + 1, (uint8_t)d);
 		return;
 	}
 	if (a < 0xffff20) {

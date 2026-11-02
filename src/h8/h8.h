@@ -148,6 +148,12 @@ void h8_sci_set_external_rate(int sci, double states_per_tick);
 int h8_sci_rx_byte(int sci, uint8_t data);
 // ADC external trigger pin
 void h8_adtrg_w(int state);
+// DMAC registers (0xffff20-0xffff3f) and the CPU bus as the DMAC sees it
+extern uint8_t h8_dmac[0x20];
+uint8_t h8_bus_read8(uint32_t a);
+uint16_t h8_bus_read16(uint32_t a);
+void h8_bus_write8(uint32_t a, uint8_t d);
+void h8_bus_write16(uint32_t a, uint16_t d);
 // print on-chip registers the firmware touched that are not implemented (once each, also logged live)
 void h8_dump_unimplemented(void);
 

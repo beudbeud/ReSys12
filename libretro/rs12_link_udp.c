@@ -114,6 +114,10 @@ static void link_poll(void)
 			got = 1;
 			s_expect = 0;
 			s_peer_seq = seq;
+#ifdef RS12_HARNESS
+			if (getenv("RS12_UDPLOG"))
+				fprintf(stderr, "udp rx from %u id %08x seq %u type %02x n %d\n", ntohs(from.sin_port), id, seq, pkt[13], (int)(n - 13));
+#endif
 			s12_link_receive(pkt + 13, (int)(n - 13));
 		}
 	}
