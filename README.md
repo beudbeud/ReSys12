@@ -115,7 +115,7 @@ ujlnow 56.7 s).
 | Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Partial | 59.94 | as above | Untested |
 | Techno Drive | `technodr` | 1998 | Playable | 59.94 | wheel on an analog stick; needs `namco_emio102.zip` (I/O board ROM) next to the set | Boots: needs `namco_emio102.zip`; wheel on the left stick, R2 gas, L2 brake |
 | Attack Pla Rail | `aplarail` | 1998 | Playable | 59.94 | lever on an analog stick; the game draws 40 pictures a second | Untested |
-| Kart Duel | `kartduel`, `kartduelja` | 2000 | Partial | | no link play | Playable: one cabinet; two linked cabinets (core option `resys12_link`, UDP) do not hold the link yet |
+| Kart Duel | `kartduel`, `kartduelja` | 2000 | Partial | | no link play | Playable: one cabinet, and two linked cabinets race each other over UDP (core options `resys12_link`, `resys12_link_id`: a different PCB ID per cabinet, both at full speed) |
 | Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | | bad dumps, also not working in MAME | Untested |
 | Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Not working | | also not working in MAME | Boots: sws2000 reaches team select, sws2001 the attract mode (one rare host crash in 7 runs) |
 | Um Jammer Lammy NOW!, Quest for Fame, Truck Kyosokyoku | `ujlnow`, `questff`, `truckk` | 1999 | Not working | | CD-XA board, not emulated | Boots: ujlnow and truckk from their CHD (`<set>/<disc>.chd`), movies and CD audio; questff untested |
@@ -305,7 +305,8 @@ core's save RAM (`.srm`); save states go through RetroArch.
 
 CD-XA sets (`truckk`, `ujlnow`, `questff`) read their disc as MAME does: `<romdir>/<set>/<disc>.chd` next to the zip.
 Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the same folder. Gun games read the RetroArch
-lightgun device. Core option `resys12_link` (Kart Duel) sets the UDP port of the cabinet link.
+lightgun device. Kart Duel links two cabinets: core option `resys12_link` sets the UDP port, `resys12_link_id` the PCB ID (1 or 2,
+one per cabinet; restart the content after changing it).
 
 ## 8. Project Layout
 
