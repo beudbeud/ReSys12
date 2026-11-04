@@ -169,6 +169,66 @@ static void poll_input(void)
 	s12.in.system = sys;
 }
 
+// ---- RetroArch input descriptors: the names its remap menu shows. One row per parent set (clones inherit), empty
+// slots read "Button n". Button order = JAMMA buttons 1-8 = RetroPad Y X B A L R L2 R2 (k_map) ----
+static const struct { const char *set, *b[8]; } k_names[] = {
+	{ "tekken3", { "Left Punch", "Right Punch", "Left Kick", "Right Kick" } },
+	{ "tektagt", { "Left Punch", "Right Punch", "Left Kick", "Right Kick", "Tag" } },
+	{ "soulclbr", { "A (Horizontal Attack)", "B (Vertical Attack)", "K (Kick)", "G (Guard)" } },
+	{ "ehrgeiz", { "High Attack", "Low Attack", "Guard", "Jump" } },
+	{ "fgtlayer", { "Light Punch", "Heavy Punch", "Light Kick", "Heavy Kick" } },
+	{ "toukon3", { "Punch", "Kick", "Grapple", "Run" } },
+	{ "ptblank2", { "Trigger" } },
+	{ "ghlpanic", { "Trigger" } },
+	{ "golgo13", { NULL, "Trigger", NULL, NULL, NULL, NULL, "Scope" } },
+	{ "g13knd", { NULL, "Trigger", NULL, NULL, NULL, NULL, "Scope" } },
+	{ "technodr", { NULL, NULL, NULL, NULL, NULL, NULL, "Brake", "Gas" } },
+	{ "truckk", { NULL, NULL, "Horn", NULL, NULL, NULL, "Brake", "Gas" } },
+	{ "kartduel", { NULL, NULL, NULL, NULL, NULL, NULL, "Brake", "Gas" } },
+};
+
+static void set_descriptors(const S12Game *g)
+{
+	static const char *const k_button[8] = { "Button 1", "Button 2", "Button 3", "Button 4", "Button 5", "Button 6", "Button 7", "Button 8" };
+	static const unsigned k_button_id[8] = { RETRO_DEVICE_ID_JOYPAD_Y, RETRO_DEVICE_ID_JOYPAD_X, RETRO_DEVICE_ID_JOYPAD_B,
+		RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_L2, RETRO_DEVICE_ID_JOYPAD_R2 };
+	static struct retro_input_descriptor desc[64];
+	const char *const *b = NULL;
+	const char *parent = g->parent[0] ? g->parent : g->name;
+	for (unsigned i = 0; i < sizeof(k_names) / sizeof(k_names[0]); i++)
+		if (!strcmp(k_names[i].set, parent))
+			b = k_names[i].b;
+	const int kind = s12_analog_kind(g);
+	const char *ax = "Left Stick X", *ay = "Left Stick Y";
+	if (kind == S12_ANALOG_GUN) ax = "Aim X", ay = "Aim Y";
+	else if (kind == S12_ANALOG_WHEEL) ax = "Steering";
+	else if (kind == S12_ANALOG_LEVER) ay = "Lever";
+	unsigned n = 0;
+	for (unsigned pl = 0; pl < 2; pl++) {
+		static const struct { unsigned id; const char *name; } fixed[] = {
+			{ RETRO_DEVICE_ID_JOYPAD_UP, "Up" }, { RETRO_DEVICE_ID_JOYPAD_DOWN, "Down" },
+			{ RETRO_DEVICE_ID_JOYPAD_LEFT, "Left" }, { RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right" },
+			{ RETRO_DEVICE_ID_JOYPAD_START, "Start" }, { RETRO_DEVICE_ID_JOYPAD_SELECT, "Coin" },
+			{ RETRO_DEVICE_ID_JOYPAD_L3, "Test" }, { RETRO_DEVICE_ID_JOYPAD_R3, "Service" },
+		};
+		for (unsigned i = 0; i < sizeof(fixed) / sizeof(fixed[0]); i++)
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, fixed[i].id, fixed[i].name };
+		for (unsigned i = 0; i < 8; i++)
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, k_button_id[i], b && b[i] ? b[i] : k_button[i] };
+		desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, ax };
+		desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, ay };
+		if (kind == S12_ANALOG_GUN) {
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER, "Trigger" };
+			if (g->state == S12_S_GOLGO13)
+				desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A, "Scope" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START, "Start" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SELECT, "Coin" };
+		}
+	}
+	desc[n] = (struct retro_input_descriptor){ 0, 0, 0, 0, NULL };
+	env_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+}
+
 static int s_link_id; // Kart Duel PCB ID to write into the EEPROM settings (0: leave them)
 
 // ---- libretro ----
@@ -183,6 +243,12 @@ void retro_set_environment(retro_environment_t cb)
 		{ NULL, NULL },
 	};
 	cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
+	// ponytail: the lightgun is offered on every set (the game is not known yet); non-gun sets never read it
+	static const struct retro_controller_description pads[] = {
+		{ "RetroPad", RETRO_DEVICE_JOYPAD }, { "Lightgun", RETRO_DEVICE_LIGHTGUN },
+	};
+	static const struct retro_controller_info ports[] = { { pads, 2 }, { pads, 2 }, { NULL, 0 } };
+	cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void *)ports);
 }
 void retro_set_video_refresh(retro_video_refresh_t cb) { video_cb = cb; }
 void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
@@ -246,6 +312,7 @@ bool retro_load_game(const struct retro_game_info *game)
 		return false;
 	}
 	s12_attach(&s_rom);
+	set_descriptors(s12.game);
 	{ // MAME ROT90 / ROT270 (vertical screens); libretro counts quarter turns counter-clockwise
 		const int rot = s12_game(s12_find_game(name))->rot;
 		unsigned turns = rot == 90 ? 3 : rot == 180 ? 2 : rot == 270 ? 1 : 0;
