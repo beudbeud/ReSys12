@@ -93,7 +93,7 @@ well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlno
 | Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable |  |
 | Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable |  |
 | Libero Grande | `lbgrande` | 1997 | Playable | the game draws 30 pictures a second |
-| Super World Stadium '98 | `sws98` | 1998 | Boots | the test runs reach team select, a match is not reached yet |
+| Super World Stadium '98 | `sws98` | 1998 | Boots | the test runs reach a match (first innings) |
 | Super World Stadium '99 | `sws99` | 1999 | Boots | as `sws98` |
 | Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable |  |
 | Aqua Rush | `aquarush` | 1999 | Playable |  |
@@ -111,7 +111,7 @@ well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlno
 | Attack Pla Rail | `aplarail` | 1998 | Playable | lever on the left stick |
 | Kart Duel | `kartduel`, `kartduelja` | 2000 | Playable | two cabinets race over UDP, on the LAN or through the Recalbox link-lobby (see section 7) |
 | Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | bad dumps, also not working in MAME |
-| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach team select (`sws2000`) and the batting order (`sws2001`), not a match; not working in MAME |
+| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach a match (first innings); not working in MAME |
 | Um Jammer Lammy NOW! | `ujlnow` | 1999 | Playable | CD-XA board: disc `ujlnow/ul1-a.chd` next to the zip, CD audio |
 | Truck Kyosokyoku | `truckk` | 2000 | Playable | disc `truckk/tkk2-a.chd`; 2 coins, then the horn (button 3, RetroPad B) starts a game; R2 gas, L2 brake |
 | Quest for Fame | `questff` | 1999 | Untested | CD-XA board; no dump here |
