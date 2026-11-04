@@ -98,6 +98,7 @@ static float stick(unsigned pl, unsigned id)
 }
 static float clamp01(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
 
+static float s_test_analog; // ponytail: one scripted axis (lever, wheel); gun games shoot the screen centre
 static void analog_input(void)
 {
 	const int kind = s12_analog_kind(s12.game);
@@ -137,11 +138,11 @@ static void analog_input(void)
 			dsteer = dsteer < 1.0f ? dsteer + 0.07f : 1.0f;
 		else
 			dsteer = dsteer > 0.1f ? dsteer - 0.1f : dsteer < -0.1f ? dsteer + 0.1f : 0.0f;
-		float steer = stick(0, RETRO_DEVICE_ID_ANALOG_X) + dsteer;
+		float steer = stick(0, RETRO_DEVICE_ID_ANALOG_X) + dsteer + s_test_analog;
 		steer = steer < -1.0f ? -1.0f : steer > 1.0f ? 1.0f : steer;
 		s12_set_wheel(steer, (p & S12_IN_B8) ? 1.0f : 0.0f, (p & S12_IN_B7) ? 1.0f : 0.0f);
 	} else if (kind == S12_ANALOG_LEVER) {
-		s12_set_lever(-stick(0, RETRO_DEVICE_ID_ANALOG_Y));
+		s12_set_lever(-stick(0, RETRO_DEVICE_ID_ANALOG_Y) + s_test_analog);
 	}
 }
 
@@ -480,8 +481,9 @@ void retro_reset(void)
 		psxReset();
 }
 
-// ---- test hooks (headless runs): RS12_INPUT="frame:p1hex:syshex,..." as the Vita's input.txt (a P1 mask 0xfffff
-// mashes buttons from then on); RS12_DUMP_DIR + RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
+// ---- test hooks (headless runs): RS12_INPUT="frame:p1hex:syshex[:analog],..." as the Vita's input.txt (a P1 mask
+// 0xfffff mashes buttons from then on; analog -100..100 holds the lever / the wheel); RS12_DUMP_DIR +
+// RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
 static void test_hooks(uint32_t frame)
 {
 	{ // tests: RS12_STATETEST=s,l saves a state at frame s and loads it back at frame l
@@ -512,13 +514,14 @@ static void test_hooks(uint32_t frame)
 	}
 	static int init, in_n, in_i;
 	static unsigned in_f[64], in_p1[64], in_sys[64];
+	static int in_an[64], cur_an;
 	static uint32_t cur_p1, cur_sys, mash_rng = 12345, mash_p1;
 	static const char *dump_dir;
 	static int dump_every;
 	if (!init) {
 		init = 1;
 		const char *e = getenv("RS12_INPUT");
-		while (e && in_n < 64 && sscanf(e, " %u:%x:%x", &in_f[in_n], &in_p1[in_n], &in_sys[in_n]) == 3) {
+		while (e && in_n < 64 && sscanf(e, " %u:%x:%x:%d", &in_f[in_n], &in_p1[in_n], &in_sys[in_n], &in_an[in_n]) >= 3) {
 			in_n++;
 			e = strchr(e, ',');
 			if (e)
@@ -530,8 +533,10 @@ static void test_hooks(uint32_t frame)
 	while (in_i < in_n && frame >= in_f[in_i]) {
 		cur_p1 = in_p1[in_i];
 		cur_sys = in_sys[in_i];
+		cur_an = in_an[in_i];
 		in_i++;
 	}
+	s_test_analog = cur_an / 100.0f;
 	if (cur_p1 == 0xfffff) {
 		if (frame % 6 == 0) {
 			mash_rng = mash_rng * 1103515245u + 12345u;
