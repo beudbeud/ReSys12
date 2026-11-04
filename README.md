@@ -296,8 +296,11 @@ retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
 Headless regression runs (RetroArch null drivers, scripted input, picture hashes): `libretro/tests/headless.py`
 (`--update` records the expected hashes; romset dir in `RS12_ROMS`).
 
-RetroPad: Y X B A L R L2 R2 = buttons 1-8, Start, Select = coin, L3 = test, R3 = service. The EEPROM is the
-core's save RAM (`.srm`); save states go through RetroArch.
+RetroPad: Y X B A L R L2 R2 = buttons 1-8, Start, Select = coin, L3 = test, R3 = service. With no stick to click
+(arcade panel, wheel), the core options `resys12_service_mode` (`start_hold`) and `resys12_service1` (`start_b_hold`)
+move them onto Start held alone for 5 s (Test, the operator menu) and Start + B held together for 5 s (Service), as
+the blueflash core does; the press fires once when the 5 s are reached, and Start and B still reach the game
+meanwhile. The EEPROM is the core's save RAM (`.srm`); save states go through RetroArch.
 
 CD-XA sets (`truckk`, `ujlnow`, `questff`) read their disc as MAME does: `<romdir>/<set>/<disc>.chd` next to the zip.
 Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the same folder. Gun games read the RetroArch

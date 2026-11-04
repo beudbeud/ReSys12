@@ -145,8 +145,46 @@ static void analog_input(void)
 	}
 }
 
+// ---- cabinet Test / Service buttons, as the blueflash core: on the stick clicks (L3 / R3 of player 1), or for arcade
+// panels and wheels with no stick to click, a chord held 5 s presses the button once for 0.2 s the moment the 5 s are
+// reached (Start alone = Test, Start + B = Service; B during a Start hold turns it into the other chord). Start and B
+// still reach the game during the hold ----
+static int s_test_hold, s_service_hold; // resys12_service_mode / resys12_service1: 1 = long hold, 0 = stick click
+static struct hold { unsigned held, press; int fired; } s_hold_test, s_hold_service;
+
+static int hold_update(struct hold *h, int held)
+{
+	const unsigned threshold = 299, press = 12; // 5 s and 0.2 s at 59.82 Hz
+	if (!held)
+		h->held = 0, h->fired = 0;
+	else if (!h->fired && ++h->held >= threshold)
+		h->fired = 1, h->press = press;
+	if (!h->press)
+		return 0;
+	h->press--;
+	return 1;
+}
+
+static void read_service_vars(void)
+{
+	struct retro_variable v = { "resys12_service_mode", NULL };
+	if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
+		s_test_hold = !strcmp(v.value, "start_hold");
+	v.key = "resys12_service1", v.value = NULL;
+	if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
+		s_service_hold = !strcmp(v.value, "start_b_hold");
+	memset(&s_hold_test, 0, sizeof(s_hold_test)); // (a hold started under the other setting must not fire)
+	memset(&s_hold_service, 0, sizeof(s_hold_service));
+}
+
 static void poll_input(void)
 {
+	static int vars_read;
+	bool updated = false;
+	if (!vars_read || (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE, &updated) && updated)) {
+		vars_read = 1;
+		read_service_vars();
+	}
 	input_poll_cb();
 	uint32_t sys = 0;
 	for (int pl = 0; pl < 2; pl++) {
@@ -164,8 +202,17 @@ static void poll_input(void)
 		if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT))
 			sys |= pl ? S12_SYS_COIN2 : S12_SYS_COIN1;
 	}
-	if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3))
+	const int start = in_st(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START) != 0;
+	const int b = in_st(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B) != 0;
+	int test = in_st(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3) != 0;
+	int service = (s12.in.player[0] & S12_IN_SERVICE) != 0;
+	if (s_test_hold) // ponytail: the L3 / R3 descriptors still read Test / Service in this mode
+		test = hold_update(&s_hold_test, start && !b);
+	if (s_service_hold)
+		service = hold_update(&s_hold_service, start && b);
+	if (test)
 		sys |= S12_SYS_TEST;
+	s12.in.player[0] = (s12.in.player[0] & ~(uint32_t)S12_IN_SERVICE) | (service ? S12_IN_SERVICE : 0);
 	s12.in.system = sys;
 }
 
@@ -240,6 +287,8 @@ void retro_set_environment(retro_environment_t cb)
 	static const struct retro_variable vars[] = {
 		{ "resys12_link", "Cabinet link (Kart Duel, udp port, content restart); disabled|22260|22270" },
 		{ "resys12_link_id", "Cabinet PCB ID (Kart Duel, content restart); 1|2" },
+		{ "resys12_service_mode", "Test button (operator menu): L3, or Start held 5 s; l3|start_hold" },
+		{ "resys12_service1", "Service button: R3, or Start + B held 5 s; r3|start_b_hold" },
 		{ NULL, NULL },
 	};
 	cb(RETRO_ENVIRONMENT_SET_VARIABLES, (void *)vars);
