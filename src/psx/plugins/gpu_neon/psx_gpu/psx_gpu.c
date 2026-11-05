@@ -372,10 +372,10 @@ void update_texture_cache_region(psx_gpu_struct *psx_gpu, u32 x1, u32 y1,
 {
   s32 w = x2 - x1;
   // ReSys12: VRAM transfers wrap at line 1024; invalidate the wrapped part too
-  if (unlikely(y2 > 1023))
+  if (unlikely(y2 > (u32)rs12_vram_ymask))
   {
-    update_texture_cache_region(psx_gpu, x1, 0, x2, y2 - 1024);
-    y2 = 1023;
+    update_texture_cache_region(psx_gpu, x1, 0, x2, y2 - rs12_vram_ymask - 1);
+    y2 = rs12_vram_ymask;
   }
   do
   {

@@ -175,6 +175,10 @@ void vout_set_config(const struct rearmed_cbs *config);
 
 // helpers
 #define VRAM_MEM_XY(vram_, x, y) &vram_[(y) * 1024 + (x)]
+// ReSys12: VRAM lines - 1: 1023 on System 12 (2MB VRAM, the 10-bit Y masks), 511 on System 11 (stock PS1 GPU,
+// 9-bit Y, tpage bit 11 ignored). Set before GPU_open
+extern int rs12_vram_ymask;
+#define RS12_TPAGE_MASK (rs12_vram_ymask > 511 ? 0x9ff : 0x1ff)
 
 int  do_vram_copy_pre(struct psx_gpu *gpu, const uint32_t *params, int *cpu_cycles);
 int  do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params);

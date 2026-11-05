@@ -281,8 +281,8 @@ static void add_draw_area_e(struct psx_gpu_async *agpu, uint32_t pos, int force,
     const uint32_t *ex_regs)
 {
   add_draw_area(agpu, pos, force,
-       ex_regs[3] & 0x3ff,       (ex_regs[3] >> 10) & 0x3ff, // ReSys12: 10-bit Y
-      (ex_regs[4] & 0x3ff) + 1, ((ex_regs[4] >> 10) & 0x3ff) + 1);
+       ex_regs[3] & 0x3ff,       (ex_regs[3] >> 10) & rs12_vram_ymask, // ReSys12: 10-bit Y
+      (ex_regs[4] & 0x3ff) + 1, ((ex_regs[4] >> 10) & rs12_vram_ymask) + 1);
 }
 
 int gpu_async_do_cmd_list(struct psx_gpu *gpu, const uint32_t *list_data, int list_len,
@@ -336,9 +336,9 @@ int gpu_async_do_cmd_list(struct psx_gpu *gpu, const uint32_t *list_data, int li
     switch (cmd) {
       case 0x02:
         x =  (LE16TOH(slist[2]) & 0x3ff) & ~0xf;
-        y =   LE16TOH(slist[3]) & 0x3ff; // ReSys12: 10-bit Y/height
+        y =   LE16TOH(slist[3]) & rs12_vram_ymask; // ReSys12: 10-bit Y/height
         w = ((LE16TOH(slist[4]) & 0x3ff) + 0xf) & ~0xf;
-        h =   LE16TOH(slist[5]) & 0x3ff;
+        h =   LE16TOH(slist[5]) & rs12_vram_ymask;
         darea = &agpu->draw_areas[agpu->pos_area];
         if (x < darea->x0 || x + w > darea->x1 || y < darea->y0 || y + h > darea->y1) {
           // let sync_scanout() know about changes outside of drawing area
@@ -361,8 +361,8 @@ int gpu_async_do_cmd_list(struct psx_gpu *gpu, const uint32_t *list_data, int li
       case 0x3c ... 0x3f: gput_sum(cyc_sum, cyc, gput_quad_base_gt());
       do_texpage:
         // ReSys12: tpage bit 11 = texture page Y + 512 on System 12
-        gpu->ex_regs[1] &= ~0x9ff;
-        gpu->ex_regs[1] |= (LE32TOH(list[4 + ((cmd >> 4) & 1)]) >> 16) & 0x9ff;
+        gpu->ex_regs[1] &= ~RS12_TPAGE_MASK;
+        gpu->ex_regs[1] |= (LE32TOH(list[4 + ((cmd >> 4) & 1)]) >> 16) & RS12_TPAGE_MASK;
         break;
       case 0x40 ... 0x47:
         gput_sum(cyc_sum, cyc, gput_line(0));
@@ -419,9 +419,9 @@ int gpu_async_do_cmd_list(struct psx_gpu *gpu, const uint32_t *list_data, int li
           break;
         }
         x =   LE16TOH(slist[4]) & 0x3ff;
-        y =   LE16TOH(slist[5]) & 0x3ff; // ReSys12: 10-bit Y/height
+        y =   LE16TOH(slist[5]) & rs12_vram_ymask; // ReSys12: 10-bit Y/height
         w = ((LE16TOH(slist[6]) - 1) & 0x3ff) + 1;
-        h = ((LE16TOH(slist[7]) - 1) & 0x3ff) + 1;
+        h = ((LE16TOH(slist[7]) - 1) & rs12_vram_ymask) + 1;
         darea = &agpu->draw_areas[agpu->pos_area];
         if ((w > 2 || h > 1) &&
             (x < darea->x0 || x + w > darea->x1 || y < darea->y0 || y + h > darea->y1))
@@ -765,7 +765,7 @@ static int do_dma_write(struct psx_gpu *gpu,
       pos = 0;
     }
 
-    y &= 1023; // ReSys12: 1024-line VRAM
+    y &= rs12_vram_ymask; // ReSys12: 1024-line VRAM
     do_vram_line(vram, x, y, (uint16_t *)&agpu->cmd_buffer[pos], w, 0, r6);
     pos += stride;
     done += stride;
@@ -856,7 +856,7 @@ static int calc_rect_wait(struct psx_gpu *gpu, int so_x0, int so_y0, int so_x1, 
   if (agpu->idle)
     // unlikely but possible - do a full sync
     return -1;
-  if (so_x1 > 1024 || so_y1 > 1024) { // ReSys12: 1024-line VRAM
+  if (so_x1 > 1024 || so_y1 > rs12_vram_ymask + 1) { // ReSys12: 1024-line VRAM
     agpu_log(gpu, "agpu: wrap %d,%d %dx%d\n",
       so_x0, so_y0, so_x1 - so_x0, so_y1 - so_y0);
     return -1;
@@ -979,7 +979,7 @@ int gpu_async_read_forward(struct psx_gpu *gpu, int x, int y, int w, int h, uint
   int hits[AGPU_AREAS_CNT], n = 0, c, i, k, row;
   uint32_t pos;
 
-  if (!agpu || RDPOS(agpu->idle) || x + w > 1024 || y + h > 1024)
+  if (!agpu || RDPOS(agpu->idle) || x + w > 1024 || y + h > rs12_vram_ymask + 1)
     return 0;
   pos = RDPOS(agpu->pos_used);
   if (agpu->draw_areas[(agpu->pos_area + 1) & AGPU_AREAS_MASK].pos > pos)
@@ -1012,7 +1012,7 @@ int gpu_async_read_forward(struct psx_gpu *gpu, int x, int y, int w, int h, uint
     for (; ch > 0; ch--, cy++) {
       if (stride > (int)(AGPU_BUF_LEN - p))
         p = 0;
-      const int ry = (cy & 1023) - y;
+      const int ry = (cy & rs12_vram_ymask) - y;
       if (ry >= 0 && ry < h) {
         const uint16_t *src = (const uint16_t *)&agpu->cmd_buffer[p];
         int x0 = cx > x ? cx : x, x1 = cx + cw < x + w ? cx + cw : x + w, px;
