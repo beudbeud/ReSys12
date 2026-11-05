@@ -22,10 +22,15 @@ int s11_c76_init(const uint8_t *bios, size_t bios_size, const uint8_t *sprog, si
 void s11_c76_reset(void);
 uint8_t *s11_c76_shared(void);                // the shared RAM, little-endian bytes (main CPU reads 16-bit words)
 void s11_c76_set_inputs(const S11C76Inputs *in);
-// runs the C76 up to the main CPU cycle count `main_cycles` (33.8688 MHz main clock; the C76 gets 16934400 / 33868800 of it)
+// runs the C76 up to the main CPU cycle count `main_cycles` (33.8688 MHz main clock, a free-running count that may
+// wrap, e.g. psxRegs.cycle). The M37702 runs at its 16.9344 MHz input / 2 as in MAME: 1 C76 cycle = 4 main cycles.
+// The first call after s11_c76_reset only latches the count.
 void s11_c76_run_until(uint32_t main_cycles);
 void s11_c76_vblank(void);                    // IRQ0 and IRQ2 (60 Hz, as MAME's timers)
-// sound: C352 at 25401600 / 288 Hz, stereo; renders the samples of one frame, returns the count of stereo pairs
+// sound: C352 at 25401600 / 288 = 88200 Hz (S12_SOUND_RATE), stereo interleaved L,R, rendered in step with the C76.
+// Returns the pairs since the last call (~1470 per 60 Hz frame); up to 4096 are buffered, older ones are dropped.
+// wave: the C352 ROM as one power-of-two image (e.g. the 4 MB tes1wave.8k file: the chip's 24-bit addresses wrap, which
+// covers MAME's loads at 0 / 0x800000).
 int s11_c76_sound_frame(int16_t *out, int max_pairs);
 size_t s11_c76_state_size(void);
 void s11_c76_state_save(void *dst);
