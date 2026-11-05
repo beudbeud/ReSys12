@@ -446,6 +446,10 @@ static bool is_nop(union code op)
 		switch (op.i.op) {
 		case OP_CP0:
 			return op.r.rs != OP_CP0_MFC0;
+		case OP_CP2: // ReSys12: an MFC2 / CFC2 to $zero waits for the GTE (the stall), as MFHI / MFLO for the multiplier
+			return false;
+		case OP_SPECIAL:
+			return op.r.op != OP_SPECIAL_MFHI && op.r.op != OP_SPECIAL_MFLO;
 		case OP_LB:
 		case OP_LH:
 		case OP_LWL:
@@ -1192,13 +1196,10 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 
 			case OP_SPECIAL_MULT:
 			case OP_SPECIAL_MULTU:
-				if (is_known(v, op->r.rs) &&
-				    is_power_of_two(v[op->r.rs].value)) {
-					tmp = op->c.i.rs;
-					op->c.i.rs = op->c.i.rt;
-					op->c.i.rt = tmp;
-				} else if (!is_known(v, op->r.rt) ||
-					   !is_power_of_two(v[op->r.rt].value)) {
+				// ReSys12: the operands are not swapped: the stall of the MULT (rs12_lightrec_stall_cb)
+				// is set by rs, so a power of two in rs keeps the MULT
+				if (!is_known(v, op->r.rt) ||
+				    !is_power_of_two(v[op->r.rt].value)) {
 					break;
 				}
 
@@ -1246,8 +1247,10 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 					op->flags |= LIGHTREC_EARLY_EXIT;
 				}
 
+				// ReSys12: a J keeps the block's segment: only when the target is in it (kunseg lost the
+				// kseg1 of the kernel's FlushCache trampoline, whose MTC0 SR then ran inline, no cache isolation)
 				if (is_known(v, op->i.rs)
-				    && kunseg(v[op->i.rs].value) >> 28 == kunseg(block->pc) >> 28) {
+				    && v[op->i.rs].value >> 28 == block->pc >> 28) {
 					pr_debug("Convert JR to J\n");
 					op->j.imm = kunseg(v[op->i.rs].value) >> 2;
 					op->j.op = OP_J;
@@ -1262,7 +1265,7 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 
 				if (is_known(v, op->r.rs)
 				    && op->r.rd == 31
-				    && kunseg(v[op->r.rs].value) >> 28 == kunseg(block->pc) >> 28) {
+				    && v[op->r.rs].value >> 28 == block->pc >> 28) { // ReSys12: as JR
 					pr_debug("Convert JALR to JAL\n");
 					op->j.imm = kunseg(v[op->i.rs].value) >> 2;
 					op->j.op = OP_JAL;
@@ -1507,6 +1510,15 @@ static int lightrec_swap_load_delays(struct lightrec_state *state,
 				continue;
 
 			if (opcode_reads_register(next, c.i.rt)
+			    && opcode_writes_register(next, c.i.rt)) {
+				// ReSys12: the next instruction reads the old value and its own result stays (the
+				// R3000 writes the load back first; pcsx's interpreter cancels the load): the access
+				// is kept for its side effects, its value is dropped
+				pr_debug("Dropping the value of the load at offset 0x%x "
+					 "(load delay)\n", i << 2);
+				block->opcode_list[i].c.i.rt = 0;
+				skip_next = true;
+			} else if (opcode_reads_register(next, c.i.rt)
 			    && !opcode_writes_register(next, c.i.rs)) {
 				pr_debug("Swapping opcodes at offset 0x%x to "
 					 "respect load delay\n", i << 2);

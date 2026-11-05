@@ -278,8 +278,10 @@ u32 lightrec_rw(struct lightrec_state *state, union code op, u32 base,
 
 	map = lightrec_get_map(state, &host, addr);
 	if (!map) {
-		__segfault_cb(state, addr, block);
-		return 0;
+		// ReSys12: nothing mapped there (kuseg above the RAM mirrors, ...): the core's memory functions
+		// (the hardware register map's handlers) answer as the interpreter would (0xffffffff, writes dropped)
+		map = &state->maps[PSX_MAP_HW_REGISTERS];
+		host = NULL;
 	}
 
 	if (flags)
@@ -287,18 +289,11 @@ u32 lightrec_rw(struct lightrec_state *state, union code op, u32 base,
 
 	if (likely(!map->ops)) {
 		if (flags && !LIGHTREC_FLAGS_GET_IO_MODE(*flags)) {
-			/* Force parallel port accesses as HW accesses, because
-			 * the direct-I/O emitters can't differenciate it. */
-			if (unlikely(map == &state->maps[PSX_MAP_PARALLEL_PORT]))
-				*flags |= LIGHTREC_IO_MODE(LIGHTREC_IO_HW);
-			/* If the base register is 0x0, be extra suspicious.
-			 * Some games (e.g. Sled Storm) actually do segmentation
-			 * faults by using uninitialized pointers, which are
-			 * later initialized to point to hardware registers. */
-			else if (op.i.rs && base == 0x0)
-				*flags |= LIGHTREC_IO_MODE(LIGHTREC_IO_HW);
-			else
-				*flags |= LIGHTREC_IO_MODE(LIGHTREC_IO_DIRECT);
+			// ReSys12: an access whose address is not known at compile time stays on the C handlers: the
+			// direct emitters only know RAM, the flash and the scratchpad, and System 12 code reaches the
+			// board (shared RAM at 0x1f08xxxx, the ROM bank window) through the same pointers it uses for RAM.
+			// ponytail: a RAM fast path with a C fallback in rec_load_direct / rec_store_direct would be faster
+			*flags |= LIGHTREC_IO_MODE(LIGHTREC_IO_HW);
 		}
 
 		ops = &lightrec_default_ops;
@@ -569,8 +564,9 @@ static void lightrec_mtc0(struct lightrec_state *state, u8 reg, u32 data)
 			lightrec_set_exit_flags(state, LIGHTREC_EXIT_CHECK_INTERRUPT);
 
 		/* Handle hardware interrupts */
+		// ReSys12: taken at the next branch (emitter.c rec_mtc0): one cycle unit left
 		if (reg == 12 && !(~status & 0x401) && (~oldstatus & 0x401))
-			lightrec_set_exit_flags(state, LIGHTREC_EXIT_CHECK_INTERRUPT);
+			state->target_cycle = state->current_cycle + 1;
 	}
 }
 
@@ -1375,8 +1371,11 @@ static unsigned int lightrec_get_mips_block_len(const u32 *src)
 	}
 }
 
+// ReSys12: decode-time instruction substitutions (libpcsxcore/lightrec/plugin.c, from the board's table)
+u32 rs12_lightrec_subst(u32 pc, u32 code, u32 prev);
+
 static struct opcode * lightrec_disassemble(struct lightrec_state *state,
-					    const u32 *src, unsigned int *len)
+					    u32 pc, const u32 *src, unsigned int *len)
 {
 	struct opcode_list *list;
 	unsigned int i, length;
@@ -1393,7 +1392,7 @@ static struct opcode * lightrec_disassemble(struct lightrec_state *state,
 	list->nb_ops = (u16) length;
 
 	for (i = 0; i < length; i++) {
-		list->ops[i].opcode = LE32TOH(src[i]);
+		list->ops[i].opcode = rs12_lightrec_subst(pc + i * 4, LE32TOH(src[i]), i ? LE32TOH(src[i - 1]) : 0); // ReSys12
 		list->ops[i].flags = 0;
 	}
 
@@ -1423,7 +1422,7 @@ static struct block * lightrec_precompile_block(struct lightrec_state *state,
 		return NULL;
 	}
 
-	list = lightrec_disassemble(state, code, &length);
+	list = lightrec_disassemble(state, pc, code, &length);
 	if (!list) {
 		lightrec_free(state, MEM_FOR_IR, sizeof(*block), block);
 		return NULL;
@@ -2000,6 +1999,7 @@ struct lightrec_state * lightrec_init(char *argv0,
 	state->c_wrappers[C_WRAPPER_MFC] = lightrec_mfc_cb;
 	state->c_wrappers[C_WRAPPER_MTC] = lightrec_mtc_cb;
 	state->c_wrappers[C_WRAPPER_CP] = lightrec_cp_cb;
+	state->c_wrappers[C_WRAPPER_RS12_STALL] = rs12_lightrec_stall_cb; // ReSys12
 
 	map = &maps[PSX_MAP_BIOS];
 	state->offset_bios = (uintptr_t)map->address - map->pc;

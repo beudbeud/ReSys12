@@ -6,27 +6,32 @@
 #ifndef __LIGHTREC_CONFIG_H__
 #define __LIGHTREC_CONFIG_H__
 
+// ReSys12: pcsx_rearmed's include/lightrec/lightrec-config.h with the options that change the cycle count off
+// (the recompiler has to time as the interpreter, which records the test pictures): no interpreter first pass,
+// no memset replacement (estimated cycles), no idle loop skipping (lands on the event cycle exactly, the code
+// overshoots by part of a loop), mult/div results through LO/HI (their stalls on MFLO/MFHI), delay slots in
+// their place (a memory access there sees the branch counted), the div-by-zero check sequences kept (their
+// branch skips the break: one instruction less than the NOPs they became)
 #define ENABLE_THREADED_COMPILER LIGHTREC_ENABLE_THREADED_COMPILER
-#define ENABLE_FIRST_PASS 1
+#define ENABLE_FIRST_PASS 0
 #define ENABLE_DISASSEMBLER LIGHTREC_ENABLE_DISASSEMBLER
 #define ENABLE_CODE_BUFFER 1
 
 #define HAS_DEFAULT_ELM 1
 
-#define OPT_REMOVE_DIV_BY_ZERO_SEQ 1
-#define OPT_REPLACE_MEMSET LIGHTREC_NO_DEBUG
+#define OPT_REMOVE_DIV_BY_ZERO_SEQ 0
+#define OPT_REPLACE_MEMSET 0
 #define OPT_DETECT_IMPOSSIBLE_BRANCHES 1
 #define OPT_HANDLE_LOAD_DELAYS 1
 #define OPT_TRANSFORM_OPS 1
 #define OPT_LOCAL_BRANCHES 1
-#define OPT_SWITCH_DELAY_SLOTS 1
+#define OPT_SWITCH_DELAY_SLOTS 0
 #define OPT_FLAG_IO 1
-#define OPT_FLAG_MULT_DIV LIGHTREC_NO_DEBUG
+#define OPT_FLAG_MULT_DIV 0
 #define OPT_EARLY_UNLOAD 1
 #define OPT_PRELOAD_PC 1
-#define OPT_DETECT_IDLE 1
+#define OPT_DETECT_IDLE 0
 
 #define OPT_SH4_USE_GBR 0
 
 #endif /* __LIGHTREC_CONFIG_H__ */
-

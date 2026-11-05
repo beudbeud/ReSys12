@@ -309,8 +309,8 @@ void psxMemMapRead(u32 phys, u32 size, u8 *mem)
 	uintptr_t *lut = psxRegs.ptrs.memRLUT;
 	static const u32 segs[3] = { 0x00000000u, 0x80000000u, 0xa0000000u };
 	u32 s, i;
-#ifndef DRC_DISABLE
-	new_dyna_pcsx_mem_map_read(phys, size, mem); // same window in the recompiler's tables
+#if !defined(DRC_DISABLE) && !defined(LIGHTREC)
+	new_dyna_pcsx_mem_map_read(phys, size, mem); // same window in the recompiler's tables (lightrec: its handlers read the LUT)
 #endif
 	if (DISABLE_MEM_LUTS || !lut)
 		return;

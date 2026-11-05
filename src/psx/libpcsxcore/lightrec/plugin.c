@@ -1,13 +1,14 @@
+// pcsx_rearmed libpcsxcore/lightrec/plugin.c, changed for ReSys12 (Namco System 12): the memory map (4MB RAM, 4MB
+// program flash, the board's I/O and banked ROM window on the core's memory handlers), the interpreter's cycle
+// accounting (16.16 cycles per instruction, the fraction kept in psxRegs.subCycle) and its instruction
+// substitutions. Changes carry "ReSys12:" comments. GPL-2.0-or-later (as pcsx_rearmed).
 #include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
-#include <signal.h>
 #include <assert.h>
-
-#if P_HAVE_MMAP
 #include <sys/mman.h>
-#endif
 
 #include "lightrec.h"
 #include "../cdrom.h"
@@ -22,10 +23,10 @@
 #include "../psxhle.h"
 #include "../psxevents.h"
 
-#include "../frontend/main.h"
-
 #include "mem.h"
 #include "plugin.h"
+#include "s12_hle.h" // ReSys12: game routines run natively
+#include "lightrec-private.h"
 
 #if (defined(__arm__) || defined(__aarch64__)) && !defined(ALLOW_LIGHTREC_ON_ARM)
 #error "Lightrec should not be used on ARM (please specify DYNAREC=ari64 to make)"
@@ -61,10 +62,6 @@
 #  endif
 #endif
 
-#ifndef GPUSTATUS_POLLING_THRESHOLD
-#  define GPUSTATUS_POLLING_THRESHOLD 0
-#endif
-
 psxRegisters psxRegs;
 Rcnt rcnts[4];
 
@@ -80,7 +77,24 @@ static bool ram_disabled;
 static bool lightrec_debug, lightrec_very_debug;
 static u32 lightrec_begin_cycles;
 
-extern u32 lightrec_hacks;
+static u32 lightrec_hacks; // ReSys12: (pcsx_rearmed frontend/main.c) none: System 12 games keep their stack in the scratchpad
+
+// ReSys12: decode-time instruction substitutions (new_dynarec.c rs12_subst_source): entries of address, expected
+// word, expected previous word, replacement; set by the board code (s12.c)
+const unsigned int *rs12_ndrc_subst;
+int rs12_ndrc_subst_n;
+
+u32 rs12_lightrec_subst(u32 pc, u32 code, u32 prev)
+{
+	if (rs12_hle_lz_head && pc == rs12_hle_lz_head) // a game routine run natively (s12_hle.c), as the interpreter
+		return RS12_HLE_OP | RS12_HLE_CODE_LZ;
+	for (int k = 0; k < rs12_ndrc_subst_n; k++) {
+		const unsigned int *e = rs12_ndrc_subst + k * 4;
+		if (e[0] == pc && e[1] == code && e[2] == prev)
+			return e[3];
+	}
+	return code;
+}
 
 static void lightrec_plugin_apply_config();
 extern void lightrec_code_inv(void *ptr, uint32_t len);
@@ -104,10 +118,22 @@ static bool has_interrupt(void)
 		(regs->cp0[12] & regs->cp0[13] & 0x0300);
 }
 
+// ReSys12: lightrec counts psxRegs.subCycleStep per instruction (16.16 cycles, the interpreter's addCycle) and
+// psxRegs.subCycle keeps the fraction across both, so the cycle totals agree exactly. The count of a run fits
+// 31 bits: 30000 cycles at most per run (the events are usually much closer)
 static void lightrec_transition_to_pcsx(struct lightrec_state *state)
 {
-	psxRegs.cycle += lightrec_current_cycle_count(state) / 1024;
+	u32 c = lightrec_current_cycle_count(state) + psxRegs.subCycle;
+	psxRegs.cycle += c >> 16;
+	psxRegs.subCycle = c & 0xffff;
 	lightrec_reset_cycle_count(state, 0);
+}
+
+static u32 lightrec_cycles_for(s32 cycles_pcsx)
+{
+	if (cycles_pcsx > 30000)
+		cycles_pcsx = 30000;
+	return (u32)cycles_pcsx * 65536 - psxRegs.subCycle;
 }
 
 static void lightrec_transition_from_pcsx(struct lightrec_state *state)
@@ -117,120 +143,180 @@ static void lightrec_transition_from_pcsx(struct lightrec_state *state)
 	if (block_stepping || cycles_left <= 0 || has_interrupt())
 		lightrec_set_exit_flags(state, LIGHTREC_EXIT_CHECK_INTERRUPT);
 	else {
-		lightrec_set_target_cycle_count(state, cycles_left * 1024);
+		lightrec_set_target_cycle_count(state, lightrec_cycles_for(cycles_left));
 	}
 }
 
-static void hw_write_byte(struct lightrec_state *state,
+// ReSys12: everything outside RAM, scratchpad and the flash goes through the core's memory functions (psxmem.c):
+// hardware registers, the board's I/O and the banked ROM window through its read LUT (the current bank), the
+// flash's writes (ignored) and its tektagt protection register
+static void mem_write_byte(struct lightrec_state *state,
 			  u32 op, void *host, u32 mem, u32 val)
 {
 	lightrec_transition_to_pcsx(state);
 
-	psxHwWrite8(&psxRegs, mem, val);
+	psxMemWrite8(&psxRegs, mem, val);
 
 	lightrec_transition_from_pcsx(state);
 }
 
-static void hw_write_half(struct lightrec_state *state,
+static void mem_write_half(struct lightrec_state *state,
 			  u32 op, void *host, u32 mem, u32 val)
 {
 	lightrec_transition_to_pcsx(state);
 
-	psxHwWrite16(&psxRegs, mem, val);
+	psxMemWrite16(&psxRegs, mem, val);
 
 	lightrec_transition_from_pcsx(state);
 }
 
-static void hw_write_word(struct lightrec_state *state,
+static void mem_write_word(struct lightrec_state *state,
 			  u32 op, void *host, u32 mem, u32 val)
 {
 	lightrec_transition_to_pcsx(state);
 
-	psxHwWrite32(&psxRegs, mem, val);
+	psxMemWrite32(&psxRegs, mem, val);
 
 	lightrec_transition_from_pcsx(state);
 }
 
-static u8 hw_read_byte(struct lightrec_state *state, u32 op, void *host, u32 mem)
+static u8 mem_read_byte(struct lightrec_state *state, u32 op, void *host, u32 mem)
 {
 	u8 val;
 
 	lightrec_transition_to_pcsx(state);
 
-	val = psxHwRead8(&psxRegs, mem);
+	val = psxMemRead8(&psxRegs, mem);
 
 	lightrec_transition_from_pcsx(state);
 
 	return val;
 }
 
-static u16 hw_read_half(struct lightrec_state *state,
+static u16 mem_read_half(struct lightrec_state *state,
 			u32 op, void *host, u32 mem)
 {
 	u16 val;
 
 	lightrec_transition_to_pcsx(state);
 
-	val = psxHwRead16(&psxRegs, mem);
+	val = psxMemRead16(&psxRegs, mem);
 
 	lightrec_transition_from_pcsx(state);
 
 	return val;
 }
 
-static u32 hw_read_word(struct lightrec_state *state,
+static u32 mem_read_word(struct lightrec_state *state,
 			u32 op, void *host, u32 mem)
 {
-	static u32 old_cycle, oldold_cycle, old_gpusr;
-	u32 val, diff;
+	u32 val;
 
 	lightrec_transition_to_pcsx(state);
 
-	val = psxHwRead32(&psxRegs, mem);
-
-	if (GPUSTATUS_POLLING_THRESHOLD > 0 && mem == 0x1f801814) {
-		diff = psxRegs.cycle - old_cycle;
-
-		if (diff > 0
-		    && diff < GPUSTATUS_POLLING_THRESHOLD
-		    && diff == old_cycle - oldold_cycle) {
-			while (psxRegs.next_interupt > psxRegs.cycle && val == old_gpusr) {
-				psxRegs.cycle += diff;
-				val = psxHwRead32(&psxRegs, mem);
-			}
-		}
-
-		oldold_cycle = old_cycle;
-		old_cycle = psxRegs.cycle;
-		old_gpusr = val;
-	}
+	val = psxMemRead32(&psxRegs, mem);
 
 	lightrec_transition_from_pcsx(state);
 
 	return val;
 }
 
-static struct lightrec_mem_map_ops hw_regs_ops = {
-	.sb = hw_write_byte,
-	.sh = hw_write_half,
-	.sw = hw_write_word,
-	.lb = hw_read_byte,
-	.lh = hw_read_half,
-	.lw = hw_read_word,
-};
+// ReSys12: the unaligned word accesses lightrec makes of LWL/LWR and SWL/SWR pairs, as the pairs: two aligned words
+static u32 mem_read_word_u(struct lightrec_state *state, u32 op, void *host, u32 mem)
+{
+	const u32 s = (mem & 3) * 8, a = mem & ~3u;
+	u32 v = mem_read_word(state, op, host, a);
+	if (s)
+		v = (v >> s) | (mem_read_word(state, op, host, a + 4) << (32 - s));
+	return v;
+}
 
-static u32 cache_ctrl;
+static void mem_write_word_u(struct lightrec_state *state, u32 op, void *host, u32 mem, u32 val)
+{
+	const u32 s = (mem & 3) * 8, a = mem & ~3u;
+	if (!s) {
+		mem_write_word(state, op, host, a, val);
+		return;
+	}
+	const u32 m = (1u << s) - 1;
+	mem_write_word(state, op, host, a, (mem_read_word(state, op, host, a) & m) | (val << s));
+	mem_write_word(state, op, host, a + 4, (mem_read_word(state, op, host, a + 4) & ~m) | (val >> (32 - s)));
+}
+
+static struct lightrec_mem_map_ops mem_ops = {
+	.sb = mem_write_byte,
+	.sh = mem_write_half,
+	.sw = mem_write_word,
+	.lb = mem_read_byte,
+	.lh = mem_read_half,
+	.lw = mem_read_word,
+	.lwu = mem_read_word_u,
+	.swu = mem_write_word_u,
+};
 
 static void cache_ctrl_write_word(struct lightrec_state *state,
 				  u32 op, void *host, u32 mem, u32 val)
 {
-	cache_ctrl = val;
+	psxRegs.biuReg = val; // ReSys12: where the interpreter keeps it
 }
 
 static u32 cache_ctrl_read_word(struct lightrec_state *state,
 				u32 op, void *host, u32 mem)
 {
-	return cache_ctrl;
+	return psxRegs.biuReg;
+}
+
+// ReSys12: the interpreter's stalls (psxinterpreter.c psxMULT_stall ... mflohiCheckStall, gte.c gteCheckStall),
+// called by the compiled code and lightrec's interpreter before the instruction, with the exact cycle count
+void rs12_lightrec_stall_cb(struct lightrec_state *state, u32 opcode)
+{
+	const struct lightrec_registers *regs = lightrec_get_registers(state);
+	u32 rs, lz, left;
+
+	lightrec_transition_to_pcsx(state);
+	switch (opcode >> 26) {
+	case 0: // SPECIAL
+		switch (opcode & 0x3f) {
+		case 0x18: // MULT
+			rs = regs->gpr[(opcode >> 21) & 31];
+			lz = __builtin_clz(((rs ^ ((s32)rs >> 21)) | 1));
+			psxRegs.muldivBusyCycle = psxRegs.cycle + 7 + (2 - (lz / 11)) * 4;
+			break;
+		case 0x19: // MULTU
+			rs = regs->gpr[(opcode >> 21) & 31];
+			lz = __builtin_clz(rs | 1);
+			psxRegs.muldivBusyCycle = psxRegs.cycle + 7 + (2 - (lz / 11)) * 4;
+			break;
+		case 0x1a: case 0x1b: // DIV, DIVU
+			psxRegs.muldivBusyCycle = psxRegs.cycle + 37;
+			break;
+		case 0x10: case 0x12: // MFHI, MFLO
+			left = psxRegs.muldivBusyCycle - psxRegs.cycle;
+			if (left <= 37)
+				psxRegs.cycle = psxRegs.muldivBusyCycle;
+			break;
+		}
+		break;
+	case 0x19: // lightrec's OP_META_MULT2: a MULT by a power of two
+		rs = regs->gpr[(opcode >> 21) & 31];
+		lz = __builtin_clz(((rs ^ ((s32)rs >> 21)) | 1));
+		psxRegs.muldivBusyCycle = psxRegs.cycle + 7 + (2 - (lz / 11)) * 4;
+		break;
+	case 0x1a: // OP_META_MULTU2
+		rs = regs->gpr[(opcode >> 21) & 31];
+		lz = __builtin_clz(rs | 1);
+		psxRegs.muldivBusyCycle = psxRegs.cycle + 7 + (2 - (lz / 11)) * 4;
+		break;
+	case 0x12: // COP2 (psxCOP2_stall, when COP2 is enabled)
+		if (regs->cp0[12] & (1u << 30))
+			gteCheckStall(opcode & 0x3f);
+		break;
+	case 0x32: case 0x3a: // LWC2, SWC2
+		if (regs->cp0[12] & (1u << 30))
+			gteCheckStall(0);
+		break;
+	}
+	lightrec_transition_from_pcsx(state);
 }
 
 static struct lightrec_mem_map_ops cache_ctrl_ops = {
@@ -238,16 +324,22 @@ static struct lightrec_mem_map_ops cache_ctrl_ops = {
 	.lw = cache_ctrl_read_word,
 };
 
+// ReSys12: the System 12 map. 4MB of RAM mirrored once in the 8MB window; the 4MB program flash at 0x1fc00000 read
+// directly up to 0x1feffff and through the handlers above it (tektagt's protection register at 0x1ff00000); the
+// board (0x1f000000-0x1fbfffff outside the scratchpad and the hardware registers) on the handlers; the unused
+// PS1 entries have no length. The code LUT covers RAM and the flash (lightrec-private.h RAM_SIZE / BIOS_SIZE)
 static struct lightrec_mem_map lightrec_map[] = {
 	[PSX_MAP_KERNEL_USER_RAM] = {
 		/* Kernel and user memory */
 		.pc = 0x00000000,
-		.length = 0x200000,
+		.length = PSX_RAM_SIZE,
 	},
 	[PSX_MAP_BIOS] = {
 		/* BIOS */
 		.pc = 0x1fc00000,
-		.length = 0x80000,
+		.length = 0x300000,
+		.ops = &mem_ops, // ReSys12: reads of known addresses stay direct; writes (and the rest) go to the core: the
+		                 // flash is not written (mrdrillrja2 stores into it and reads the word back)
 	},
 	[PSX_MAP_SCRATCH_PAD] = {
 		/* Scratch pad */
@@ -257,13 +349,13 @@ static struct lightrec_mem_map lightrec_map[] = {
 	[PSX_MAP_PARALLEL_PORT] = {
 		/* Parallel port */
 		.pc = 0x1f000000,
-		.length = 0x10000,
+		.length = 0,
 	},
 	[PSX_MAP_HW_REGISTERS] = {
 		/* Hardware registers */
 		.pc = 0x1f801000,
-		.length = 0x8000,
-		.ops = &hw_regs_ops,
+		.length = 0xf000,
+		.ops = &mem_ops,
 	},
 	[PSX_MAP_CACHE_CONTROL] = {
 		/* Cache control */
@@ -274,60 +366,58 @@ static struct lightrec_mem_map lightrec_map[] = {
 
 	/* Mirrors of the kernel/user memory */
 	[PSX_MAP_MIRROR1] = {
-		.pc = 0x00200000,
-		.length = 0x200000,
+		.pc = PSX_RAM_SIZE,
+		.length = PSX_RAM_SIZE,
 		.mirror_of = &lightrec_map[PSX_MAP_KERNEL_USER_RAM],
 	},
 	[PSX_MAP_MIRROR2] = {
 		.pc = 0x00400000,
-		.length = 0x200000,
+		.length = 0,
 		.mirror_of = &lightrec_map[PSX_MAP_KERNEL_USER_RAM],
 	},
 	[PSX_MAP_MIRROR3] = {
 		.pc = 0x00600000,
-		.length = 0x200000,
+		.length = 0,
 		.mirror_of = &lightrec_map[PSX_MAP_KERNEL_USER_RAM],
 	},
+	// ReSys12: the board, in the entries of the PS1 BIOS mirrors
 	[PSX_MAP_BIOS_MIRROR1] = {
-		.pc = 0x1fc80000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.pc = 0x1f000000,
+		.length = 0x800000,
+		.ops = &mem_ops,
 	},
 	[PSX_MAP_BIOS_MIRROR2] = {
-		.pc = 0x1fd00000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.pc = 0x1f800400,
+		.length = 0xc00,
+		.ops = &mem_ops,
 	},
 	[PSX_MAP_BIOS_MIRROR3] = {
-		.pc = 0x1fd80000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.pc = 0x1f810000,
+		.length = 0x3f0000,
+		.ops = &mem_ops,
 	},
 	[PSX_MAP_BIOS_MIRROR4] = {
-		.pc = 0x1fe00000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.pc = 0x1ff00000,
+		.length = 0x100000,
+		.ops = &mem_ops,
 	},
 	[PSX_MAP_BIOS_MIRROR5] = {
 		.pc = 0x1fe80000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.length = 0,
 	},
 	[PSX_MAP_BIOS_MIRROR6] = {
 		.pc = 0x1ff00000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.length = 0,
 	},
 	[PSX_MAP_BIOS_MIRROR7] = {
 		.pc = 0x1ff80000,
-		.length = 0x80000,
-		.mirror_of = &lightrec_map[PSX_MAP_BIOS],
+		.length = 0,
 	},
 
 	/* Mirror of the parallel port. Only used by the PS2/PS3 BIOS */
 	[PSX_MAP_PPORT_MIRROR] = {
 		.pc = 0x1fa00000,
-		.length = 0x10000,
+		.length = 0,
 		.mirror_of = &lightrec_map[PSX_MAP_PARALLEL_PORT],
 	},
 
@@ -347,42 +437,10 @@ static void lightrec_enable_ram(struct lightrec_state *state, bool enable)
 	ram_disabled = !enable;
 }
 
-static bool lightrec_can_hw_direct(u32 kaddr, bool is_write, u8 size)
-{
-	kaddr &= 0xffff;
-	if (is_write && size != 32) {
-		// force32 so must go through handlers
-		if (0x1000 <= kaddr && kaddr < 0x1024)
-			return false;
-		if ((kaddr & 0xff80) == 0x1080) // dma
-			return false;
-	}
-
-	// io/fifo
-	if ((kaddr & 0xffec) == 0x1040 || // 1040, 1050
-	    (kaddr & 0xffc0) == 0x1100 ||
-	    (kaddr & 0xffc0) == 0x1800)
-		return false;
-
-	// need write handlers/read-only
-	if ((kaddr & 0xffe0) == 0x1040 ||
-	    (kaddr & 0xfff8) == 0x1070 ||
-	    (kaddr & 0xff88) == 0x1088 ||
-	    (kaddr & 0xfff0) == 0x10f0 ||
-	     kaddr >= 0x2000)
-		return !is_write;
-
-	// spu
-	if (0x1c00 <= kaddr && kaddr < 0x2000)
-		return false;
-
-	return true;
-}
-
 static const struct lightrec_ops lightrec_ops = {
 	.cop2_op = cop2_op,
 	.enable_ram = lightrec_enable_ram,
-	.hw_direct = lightrec_can_hw_direct,
+	.hw_direct = NULL, // ReSys12: every hardware register access through psxhw.c (as the interpreter)
 	.code_inv = LIGHTREC_CODE_INV ? lightrec_code_inv : NULL,
 };
 
@@ -393,26 +451,14 @@ static int lightrec_plugin_init(void)
 	lightrec_map[PSX_MAP_SCRATCH_PAD].address = psxRegs.ptrs.psxH;
 	lightrec_map[PSX_MAP_HW_REGISTERS].address = psxRegs.ptrs.psxH + 0x1000;
 	lightrec_map[PSX_MAP_PARALLEL_PORT].address = psxRegs.ptrs.psxP;
+	lightrec_map[PSX_MAP_BIOS_MIRROR4].address = psxRegs.ptrs.psxR + 0x300000; // ReSys12: (code fetches)
 
-	if (!LIGHTREC_CUSTOM_MAP) {
-#if P_HAVE_MMAP
-		code_buffer = mmap(0, CODE_BUFFER_SIZE,
-				   PROT_EXEC | PROT_READ | PROT_WRITE,
-				   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-		if (code_buffer == MAP_FAILED)
-			return -ENOMEM;
-#else
-		code_buffer = malloc(CODE_BUFFER_SIZE);
-		if (!code_buffer)
-			return -ENOMEM;
-#endif
-	}
-
-	if (LIGHTREC_CUSTOM_MAP) {
-		lightrec_map[PSX_MAP_MIRROR1].address = psxRegs.ptrs.psxM + 0x200000;
-		lightrec_map[PSX_MAP_MIRROR2].address = psxRegs.ptrs.psxM + 0x400000;
-		lightrec_map[PSX_MAP_MIRROR3].address = psxRegs.ptrs.psxM + 0x600000;
-	}
+	// ReSys12: the code buffer is mapped executable here (the core's own memory uses calloc, P_HAVE_MMAP=0)
+	code_buffer = mmap(0, CODE_BUFFER_SIZE,
+			   PROT_EXEC | PROT_READ | PROT_WRITE,
+			   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (code_buffer == MAP_FAILED)
+		return -ENOMEM;
 
 	lightrec_map[PSX_MAP_CODE_BUFFER].address = code_buffer;
 
@@ -431,16 +477,9 @@ static int lightrec_plugin_init(void)
 	lightrec_state = lightrec_init(LIGHTREC_PROG_NAME,
 			lightrec_map, ARRAY_SIZE(lightrec_map),
 			&lightrec_ops);
+	if (!lightrec_state)
+		return -1;
 
-	// fprintf(stderr, "M=0x%lx, P=0x%lx, R=0x%lx, H=0x%lx\n",
-	// 		(uintptr_t) psxRegs.ptrs.psxM,
-	// 		(uintptr_t) psxRegs.ptrs.psxP,
-	// 		(uintptr_t) psxRegs.ptrs.psxR,
-	// 		(uintptr_t) psxRegs.ptrs.psxH);
-
-#ifndef _WIN32
-	signal(SIGPIPE, exit);
-#endif
 	lightrec_plugin_apply_config();
 	return 0;
 }
@@ -513,7 +552,7 @@ static void print_for_big_ass_debugger(void)
 
 	if (lightrec_very_debug)
 		printf(" RAM 0x%08x SCRATCH 0x%08x HW 0x%08x",
-				hash_calculate_ram(psxRegs.ptrs.psxM, 0x200000),
+				hash_calculate_ram(psxRegs.ptrs.psxM, PSX_RAM_SIZE),
 				hash_calculate_le(psxRegs.ptrs.psxH, 0x400),
 				hash_calculate_le(psxRegs.ptrs.psxH + 0x1000, 0x2000));
 
@@ -559,6 +598,7 @@ static void lightrec_plugin_execute_internal(bool block_only)
 
 	cycles_pcsx = psxRegs.next_interupt - psxRegs.cycle;
 	assert((s32)cycles_pcsx > 0);
+again:
 
 	// step during early boot so that 0x80030000 fastboot hack works
 	// must not use 0 cycles to ensure progress
@@ -569,7 +609,7 @@ static void lightrec_plugin_execute_internal(bool block_only)
 	if (use_pcsx_interpreter) {
 		psxInt.ExecuteBlock(&psxRegs, 0);
 	} else {
-		u32 cycles_lightrec = cycles_pcsx * 1024;
+		u32 cycles_lightrec = lightrec_cycles_for((s32)cycles_pcsx); // ReSys12
 		if (unlikely(use_lightrec_interpreter)) {
 			psxRegs.pc = lightrec_run_interpreter(lightrec_state,
 							      psxRegs.pc,
@@ -597,7 +637,23 @@ static void lightrec_plugin_execute_internal(bool block_only)
 		else if (flags & LIGHTREC_EXIT_UNKNOWN_OP) {
 			u32 op = intFakeFetch(psxRegs.pc);
 			u32 hlec = op & 0x03ffffff;
-			if ((op >> 26) == 0x3b && hlec < ARRAY_SIZE(psxHLEt) && Config.HLE) {
+			if (rs12_hle_lz_head && psxRegs.pc == rs12_hle_lz_head) {
+				// ReSys12: the HLE opcode of s12_hle.c (its cycle was counted with the block, as the
+				// interpreter's addCycle); the routine sets the pc. As the interpreter, which keeps
+				// next_interupt at 0: one control byte a visit, and the loop's jump runs as code before
+				// the events are checked (the test pictures were recorded with that timing)
+				u32 next = psxRegs.next_interupt;
+				s32 left;
+				lightrec_plugin_sync_regs_to_pcsx(0);
+				psxRegs.next_interupt = 0;
+				rs12_hle_lz();
+				psxRegs.next_interupt = next;
+				lightrec_plugin_sync_regs_from_pcsx(0);
+				left = next - psxRegs.cycle;
+				cycles_pcsx = left > 0 ? left : 1;
+				goto again;
+			}
+			else if ((op >> 26) == 0x3b && hlec < ARRAY_SIZE(psxHLEt) && Config.HLE) {
 				lightrec_plugin_sync_regs_to_pcsx(0);
 				psxRegs.pc += 4; // match psxinterpreter
 				psxHLEt[hlec]();
@@ -671,50 +727,28 @@ static void lightrec_plugin_notify(enum R3000Anote note, void *data)
 
 static void lightrec_plugin_apply_config()
 {
-	static u32 cycles_per_op_old;
-	u32 cycle_mult = Config.cycle_multiplier_override && Config.cycle_multiplier == CYCLE_MULT_DEFAULT
-		? Config.cycle_multiplier_override : Config.cycle_multiplier;
-	u32 cycles_per_op = cycle_mult * 1024 / 100;
-	assert(cycles_per_op);
-
-	if (cycles_per_op_old && cycles_per_op_old != cycles_per_op) {
-		SysPrintf("lightrec: reinit block cache for cycles_per_op %.2f\n",
-			cycles_per_op / 1024.f);
-	}
-	cycles_per_op_old = cycles_per_op;
-	lightrec_set_cycles_per_opcode(lightrec_state, cycles_per_op);
+	// ReSys12: the interpreter's step (intApplyConfig: 0x10000 * cycle multiplier / 100) is lightrec's cycles per
+	// instruction
+	intApplyConfig();
+	assert(psxRegs.subCycleStep);
+	lightrec_set_cycles_per_opcode(lightrec_state, psxRegs.subCycleStep);
 
 	lightrec_set_unsafe_opt_flags(lightrec_state, lightrec_hacks);
-	intApplyConfig();
 }
 
 static void lightrec_plugin_shutdown(void)
 {
 	lightrec_destroy(lightrec_state);
-
-	if (!LIGHTREC_CUSTOM_MAP) {
-#if P_HAVE_MMAP
-		munmap(code_buffer, CODE_BUFFER_SIZE);
-#else
-		free(code_buffer);
-#endif
-	}
+	munmap(code_buffer, CODE_BUFFER_SIZE);
 }
 
 static void lightrec_plugin_reset(void)
 {
-	struct lightrec_registers *regs;
-
-	regs = lightrec_get_registers(lightrec_state);
-
 	/* Invalidate all blocks */
 	lightrec_invalidate_all(lightrec_state);
 
-	/* Reset registers */
-	memset(regs, 0, sizeof(*regs));
-
-	regs->cp0[12] = 0x10900000; // COP0 enabled | BEV = 1 | TS = 1
-	regs->cp0[15] = 0x00000002; // PRevID = Revision ID, same as R3000A
+	// ReSys12: the registers psxReset set (the interpreter's SR), not lightrec's own reset values
+	lightrec_plugin_sync_regs_from_pcsx(true);
 }
 
 static void lightrec_plugin_sync_regs_from_pcsx(bool need_cp2)

@@ -85,8 +85,9 @@
 #define BLOCK_NO_OPCODE_LIST	BIT(5)
 #define BLOCK_PRELOAD_PC	BIT(6)
 
-#define RAM_SIZE	0x200000
-#define BIOS_SIZE	0x80000
+// ReSys12: Namco System 12: 4MB of RAM (mirrored once in the 8MB window), 4MB program flash in place of the BIOS
+#define RAM_SIZE	0x400000
+#define BIOS_SIZE	0x400000
 
 #define CODE_LUT_SIZE	((RAM_SIZE + BIOS_SIZE) >> 2)
 
@@ -147,8 +148,29 @@ enum c_wrappers {
 	C_WRAPPER_MFC,
 	C_WRAPPER_MTC,
 	C_WRAPPER_CP,
+	C_WRAPPER_RS12_STALL, // ReSys12: GTE / mult / div stalls (libpcsxcore/lightrec/plugin.c)
 	C_WRAPPERS_COUNT,
 };
+
+// ReSys12: the instructions the interpreter stalls on (psxinterpreter.c _stall variants): all COP2 accesses,
+// LWC2 / SWC2, MULT / MULTU / DIV / DIVU (busy) and MFHI / MFLO (wait)
+static inline _Bool rs12_op_stalls(union code c)
+{
+	if (c.i.op == OP_CP2 || c.i.op == OP_LWC2 || c.i.op == OP_SWC2)
+		return 1;
+	if (c.i.op == OP_META_MULT2 || c.i.op == OP_META_MULTU2) // (a MULT / MULTU by a power of two)
+		return 1;
+	if (c.i.op != OP_SPECIAL)
+		return 0;
+	switch (c.r.op) {
+	case OP_SPECIAL_MFHI: case OP_SPECIAL_MFLO: case OP_SPECIAL_MULT: case OP_SPECIAL_MULTU:
+	case OP_SPECIAL_DIV: case OP_SPECIAL_DIVU:
+		return 1;
+	default:
+		return 0;
+	}
+}
+void rs12_lightrec_stall_cb(struct lightrec_state *state, u32 opcode);
 
 struct lightrec_cstate {
 	struct lightrec_state *state;

@@ -102,9 +102,19 @@ static void lightrec_emit_end_of_block(struct lightrec_cstate *state,
 		update_ra_register(reg_cache, _jit, ra_reg, block->pc, link);
 	}
 
-	if (has_ds && !op_flag_no_ds(op->flags) && !op_flag_local_branch(op->flags)) {
+	if (has_ds && !op_flag_no_ds(op->flags) && !op_flag_local_branch(op->flags))
 		cycles += lightrec_cycles_of_opcode(state->state, ds->c);
 
+	// ReSys12: counted before the delay slot runs (a memory access there syncs the count with rec_io), as rec_b
+	if (update_cycles) {
+		if (cycles) {
+			jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE, cycles);
+			pr_debug("EOB: %"PRIu32" cycles\n", cycles);
+		}
+		state->cycles = -lightrec_cycles_of_opcode(state->state, op->c);
+	}
+
+	if (has_ds && !op_flag_no_ds(op->flags) && !op_flag_local_branch(op->flags)) {
 		/* Recompile the delay slot */
 		if (ds->c.opcode)
 			lightrec_rec_opcode(state, block, offset + 1);
@@ -112,11 +122,6 @@ static void lightrec_emit_end_of_block(struct lightrec_cstate *state,
 
 	/* Clean the remaining registers */
 	lightrec_clean_regs(reg_cache, _jit);
-
-	if (cycles && update_cycles) {
-		jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE, cycles);
-		pr_debug("EOB: %"PRIu32" cycles\n", cycles);
-	}
 
 	if (has_ds && op_flag_load_delay(ds->flags)
 	    && opcode_has_load_delay(ds->c) && !state->no_load_delay) {
@@ -295,10 +300,7 @@ static void rec_b(struct lightrec_cstate *state, const struct block *block, u16 
 		if (OPT_EARLY_UNLOAD)
 			lightrec_do_early_unload(state, block, offset);
 
-		if (op_flag_local_branch(op->flags) &&
-		    (op_flag_no_ds(op->flags) || !ds->opcode) &&
-		    is_forward && !lightrec_has_dirty_regs(reg_cache))
-			no_indirection = true;
+		// ReSys12: no_indirection stays off: every local branch checks the cycle count (below)
 
 		if (no_indirection)
 			pr_debug("Using no indirection for branch at offset 0x%hx\n", offset << 2);
@@ -347,14 +349,14 @@ static void rec_b(struct lightrec_cstate *state, const struct block *block, u16 
 
 			if (no_indirection)
 				branch->branch = jit_new_node_pww(code2, NULL, rs, rt);
-			else if (is_forward)
-				branch->branch = jit_b();
 			else
-				branch->branch = jit_bgti(LIGHTREC_REG_CYCLE, 0);
+				branch->branch = jit_bgti(LIGHTREC_REG_CYCLE, 0); // ReSys12: forward ones too
 		}
 	}
 
-	if (!op_flag_local_branch(op->flags) || !is_forward) {
+	// ReSys12: the interpreter runs the events at every branch (psxBranchTest): a local branch leaves the
+	// block when the cycles are out, forward or not
+	{
 		next_pc = get_branch_pc(block, offset, 1 + (s16)op->i.imm);
 		state->no_load_delay = op_flag_local_branch(op->flags);
 		lightrec_emit_end_of_block(state, block, offset, -1, next_pc,
@@ -373,6 +375,20 @@ static void rec_b(struct lightrec_cstate *state, const struct block *block, u16 
 		if (!op_flag_no_ds(op->flags) && ds->opcode) {
 			state->no_load_delay = true;
 			lightrec_rec_opcode(state, block, offset + 1);
+		}
+
+		// ReSys12: the fall-through path leaves the block when the cycles are out (as the interpreter's
+		// psxBranchTest after a branch not taken); the branch and its delay slot are counted already
+		{
+			jit_node_t *to_cont = jit_bgti(LIGHTREC_REG_CYCLE, 0);
+			u32 pc_next = get_branch_pc(block, offset, 2);
+
+			regs_backup = lightrec_regcache_enter_branch(reg_cache);
+			lightrec_clean_regs(reg_cache, _jit);
+			lightrec_load_next_pc_imm(reg_cache, _jit, block->pc, pc_next);
+			lightrec_jump_to_known_eob(state, _jit, pc_next);
+			lightrec_regcache_leave_branch(reg_cache, regs_backup);
+			jit_patch(to_cont);
 		}
 	}
 }
@@ -1167,6 +1183,8 @@ static void rec_special_MFHI(struct lightrec_cstate *state,
 	union code c = block->opcode_list[offset].c;
 
 	_jit_name(block->_jit, __func__);
+	if (!c.r.rd) // ReSys12: to $zero: the multiplier wait only (rs12_op_stalls)
+		return;
 	rec_alu_mv_lo_hi(state, block, offset, c.r.rd, REG_HI);
 }
 
@@ -1185,6 +1203,8 @@ static void rec_special_MFLO(struct lightrec_cstate *state,
 	union code c = block->opcode_list[offset].c;
 
 	_jit_name(block->_jit, __func__);
+	if (!c.r.rd) // ReSys12: to $zero: the multiplier wait only (rs12_op_stalls)
+		return;
 	rec_alu_mv_lo_hi(state, block, offset, c.r.rd, REG_LO);
 }
 
@@ -1260,6 +1280,13 @@ static void rec_io(struct lightrec_cstate *state,
 			   LIGHTREC_REG_STATE, zero);
 		lightrec_free_reg(reg_cache, zero);
 	}
+
+	// ReSys12: the C side sees the cycle count up to and including this instruction, as the interpreter's
+	// (addCycle runs before the instruction): timer reads and event checks in the handlers agree
+	if (state->cycles + lightrec_cycles_of_opcode(state->state, c))
+		jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE,
+			 state->cycles + lightrec_cycles_of_opcode(state->state, c));
+	state->cycles = -lightrec_cycles_of_opcode(state->state, c);
 
 	if (is_tagged) {
 		call_to_c_wrapper(state, block, c.opcode, C_WRAPPER_RW);
@@ -2153,6 +2180,12 @@ static void rec_mtc(struct lightrec_cstate *state, const struct block *block, u1
 	lightrec_clean_reg_if_loaded(reg_cache, _jit, c.i.rt, false);
 	lightrec_clean_reg_if_loaded(reg_cache, _jit, REG_TEMP, false);
 
+	// ReSys12: the exact count at the call, as rec_io (lightrec_mtc0 leaves one cycle unit for the next branch)
+	if (state->cycles + lightrec_cycles_of_opcode(state->state, c))
+		jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE,
+			 state->cycles + lightrec_cycles_of_opcode(state->state, c));
+	state->cycles = -lightrec_cycles_of_opcode(state->state, c);
+
 	call_to_c_wrapper(state, block, c.opcode, C_WRAPPER_MTC);
 
 	if (c.i.op == OP_CP0 &&
@@ -2267,10 +2300,28 @@ rec_mtc0(struct lightrec_cstate *state, const struct block *block, u16 offset)
 		jit_comr(tmp2, status);
 		jit_andi(tmp2, tmp2, 0x401);
 		jit_eqi(tmp2, tmp2, 0);
-		jit_orr(tmp, tmp, tmp2);
 	}
 
 	lightrec_free_reg(reg_cache, rt);
+
+	if (c.r.rd == 12) {
+		// ReSys12: an unmasked hardware interrupt is taken at the next branch, as the interpreter's
+		// psxBranchTest: one cycle unit left, the next branch's check leaves the block (the software
+		// interrupt below leaves at once, as psxTestSWInts)
+		u32 pending = state->cycles + lightrec_cycles_of_opcode(state->state, c); // (lightrec_emit_eob below)
+
+		to_end = jit_beqi(tmp2, 0);
+
+		jit_ldxi_i(tmp2, LIGHTREC_REG_STATE, lightrec_offset(target_cycle));
+		jit_subr(tmp2, tmp2, LIGHTREC_REG_CYCLE);
+		jit_addi(tmp2, tmp2, pending);
+		jit_stxi_i(lightrec_offset(current_cycle), LIGHTREC_REG_STATE, tmp2);
+		jit_addi(tmp2, tmp2, 1);
+		jit_stxi_i(lightrec_offset(target_cycle), LIGHTREC_REG_STATE, tmp2);
+		jit_movi(LIGHTREC_REG_CYCLE, pending + 1);
+
+		jit_patch(to_end);
+	}
 
 	if (c.r.rd == 12 || c.r.rd == 13) {
 		to_end = jit_beqi(tmp, 0);
@@ -2430,6 +2481,8 @@ static void rec_cp2_basic_MFC2(struct lightrec_cstate *state,
 	bool load_delay = op_flag_load_delay(flags) && !state->no_load_delay;
 	u8 reg = load_delay ? REG_TEMP : c.i.rt;
 
+	if (!c.i.rt) // ReSys12: to $zero: the GTE wait only (rs12_op_stalls)
+		return;
 	rec_cp2_do_mfc2(state, block, offset, c.r.rd, reg);
 }
 
@@ -2445,6 +2498,8 @@ static void rec_cp2_basic_CFC2(struct lightrec_cstate *state,
 
 	_jit_name(block->_jit, __func__);
 
+	if (!c.i.rt) // ReSys12: to $zero: the GTE wait only (rs12_op_stalls)
+		return;
 	if (state->state->ops.cop2_notify) {
 		/* We must call cop2_notify, handle that in C. */
 		rec_mfc(state, block, offset);
@@ -3068,6 +3123,19 @@ void lightrec_rec_opcode(struct lightrec_cstate *state,
 		target = &state->targets[state->nb_targets++];
 		target->offset = offset;
 		target->label = jit_indirect();
+	}
+
+	// ReSys12: the interpreter's GTE / mult / div stalls, in C with the count up to and including this
+	// instruction (as rec_io). ponytail: inline arithmetic would be faster, a C call per op is exact and small
+	if (likely(op->opcode) && rs12_op_stalls(op->c)) {
+		u32 cyc = lightrec_cycles_of_opcode(state->state, op->c);
+
+		if (op->i.op == OP_SPECIAL || op->i.op == OP_META_MULT2 || op->i.op == OP_META_MULTU2)
+			lightrec_clean_reg_if_loaded(reg_cache, _jit, op->r.rs, false); // (MULT: the operand sets the busy time)
+		if (state->cycles + cyc)
+			jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE, state->cycles + cyc);
+		state->cycles = -cyc;
+		call_to_c_wrapper(state, block, op->c.opcode, C_WRAPPER_RS12_STALL);
 	}
 
 	if (likely(op->opcode)) {

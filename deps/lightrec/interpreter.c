@@ -57,6 +57,14 @@ static inline u32 execute(lightrec_int_func_t func, struct interpreter *inter)
 
 static inline u32 lightrec_int_op(struct interpreter *inter)
 {
+	// ReSys12: the interpreter's GTE / mult / div stalls (a delay slot was counted by update_cycles_before_branch)
+	if (rs12_op_stalls(inter->op->c)) {
+		if (!inter->delay_slot) {
+			inter->state->current_cycle += inter->cycles + lightrec_cycles_of_opcode(inter->state, inter->op->c);
+			inter->cycles = -lightrec_cycles_of_opcode(inter->state, inter->op->c);
+		}
+		rs12_lightrec_stall_cb(inter->state, inter->op->c.opcode);
+	}
 	return execute(int_standard[inter->op->i.op], inter);
 }
 
@@ -612,6 +620,13 @@ static u32 int_io(struct interpreter *inter, bool is_load)
 
 	if (!inter->load_delay && inter->block)
 		flags = &inter->op->flags;
+
+	// ReSys12: the handlers see the count up to and including this instruction (a delay slot was counted by
+	// update_cycles_before_branch), as the compiled code's rec_io
+	if (!inter->delay_slot) {
+		inter->state->current_cycle += inter->cycles + lightrec_cycles_of_opcode(inter->state, inter->op->c);
+		inter->cycles = -lightrec_cycles_of_opcode(inter->state, inter->op->c);
+	}
 
 	val = lightrec_rw(inter->state, inter->op->c,
 			  reg_cache[op->rs], reg_cache[op->rt],
