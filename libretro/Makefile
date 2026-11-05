@@ -1,4 +1,4 @@
-# ReSys12 libretro core (Namco System 12 and System 11). Linux hosts: x86_64 (interpreter), armv7 / aarch64 (ari64 recompiler).
+# ReSys12 libretro core (Namco System 12 and System 11). Linux hosts: x86_64 (lightrec recompiler), armv7 / aarch64 (ari64 recompiler).
 #   make -C libretro                               native
 #   make -C libretro CC=aarch64-linux-gnu-gcc      Raspberry Pi 5 (64-bit OS)
 CC ?= gcc
@@ -49,9 +49,9 @@ else ifeq ($(ARCH),aarch64)
   GPU_IF_FLAGS += -DSIMD_BUILD
   CFLAGS += -DSIMD_BUILD
 else
-  # no ari64 backend: R3000A interpreter; make LIGHTREC=1 for the lightrec recompiler (deps/lightrec + GNU lightning,
-  # x86). ponytail: opt-in until sws98/sws99/sws2000/sws2001 match the interpreter in the headless runs
-  LIGHTREC ?= 0
+  # no ari64 backend: the lightrec recompiler on x86_64 (deps/lightrec + GNU lightning, x86 only), else the R3000A
+  # interpreter; make LIGHTREC=0 for the interpreter on x86_64
+  LIGHTREC ?= $(if $(filter x86_64,$(ARCH)),1,0)
   GPU_IF_FLAGS :=
   ifeq ($(LIGHTREC),1)
     LR := $(ROOT)/deps/lightrec
