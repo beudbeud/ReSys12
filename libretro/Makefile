@@ -47,8 +47,9 @@ else ifeq ($(ARCH),aarch64)
   GPU_IF_FLAGS += -DSIMD_BUILD
   CFLAGS += -DSIMD_BUILD
 else
-  # no ari64 backend: lightrec recompiler (deps/lightrec + GNU lightning, x86); make LIGHTREC=0 for the R3000A interpreter
-  LIGHTREC ?= 1
+  # no ari64 backend: R3000A interpreter; make LIGHTREC=1 for the lightrec recompiler (deps/lightrec + GNU lightning,
+  # x86). ponytail: opt-in until sws98/sws99/sws2000/sws2001 match the interpreter in the headless runs
+  LIGHTREC ?= 0
   GPU_IF_FLAGS :=
   ifeq ($(LIGHTREC),1)
     LR := $(ROOT)/deps/lightrec
