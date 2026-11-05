@@ -316,6 +316,7 @@ static noinline void get_gpu_info(struct psx_gpu *gpu, uint32_t data)
 // ReSys12: System 12 has 2MB VRAM (1024x1024); keep a 512-line guard after it
 // for scanouts that run past line 1023
 #define VRAM_SIZE ((1024 * 1024 * 2) + (1024 * 512 * 2) + max(VRAM_ALIGN, 4096))
+int rs12_vram_ymask = 1023; // ReSys12 (gpu.h)
 
 // vram ptr received from mmap/malloc/alloc (will deallocate using this)
 static uint16_t *vram_ptr_orig = NULL;
@@ -421,7 +422,7 @@ void GPUwriteStatus(uint32_t data)
       fb_dirty = 0;
       break;
     case 0x05:
-      src_x = data & 0x3ff; src_y = (data >> 10) & 0x3ff; // ReSys12: 10-bit display Y
+      src_x = data & 0x3ff; src_y = (data >> 10) & rs12_vram_ymask; // ReSys12: 10-bit display Y
       changed = src_x != gpu.screen.src_x || src_y != gpu.screen.src_y;
       frame = *gpu.state.frame_count;
       // last_flip_frame check allows frameskip on dheight games
@@ -548,7 +549,7 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
   // ReSys12: a transfer that arrives in pieces of whole rows (ehrgeiz scrolls a 16x64 buffer every frame: one row,
   // then the rest) is queued piece by piece instead of waiting for the whole render queue (3-4ms a frame)
   if (gpu_async_enabled(gpu) && !is_read && o == 0 && !(w & 1) && count < tw && count % (w / 2) == 0 &&
-      y + count / (w / 2) <= 1024 && count <= AGPU_DMA_MAX) {
+      y + count / (w / 2) <= rs12_vram_ymask + 1 && count <= AGPU_DMA_MAX) {
     const int rows = count / (w / 2);
     gpu->dma.h = rows;
     if (gpu_async_try_dma(gpu, data, count)) {
@@ -567,13 +568,13 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
       int row, bad = 0;
       gpu_async_sync_rect(gpu, x, y, w, h);
       for (row = 0; row < h; row++)
-        bad |= memcmp(sdata + row * w, vram + ((y + row) & 1023) * 1024 + x, w * 2) != 0;
+        bad |= memcmp(sdata + row * w, vram + ((y + row) & rs12_vram_ymask) * 1024 + x, w * 2) != 0;
       rs12_fwd_n++;
       rs12_fwd_bad += bad;
     }
 #endif
     finish_vram_transfer(gpu, is_read, 0);
-    gpu->dma.y = (y + h) & 1023;
+    gpu->dma.y = (y + h) & rs12_vram_ymask;
     gpu->dma.h = 0;
     gpu->dma.offset = 0;
     return w * h / 2;
@@ -610,13 +611,13 @@ static int do_vram_io(struct psx_gpu *gpu, uint32_t *data, int count, int is_rea
   }
 
   for (; h > 0 && count >= w; sdata += w, count -= w, y++, h--) {
-    y &= 1023; // ReSys12: 1024-line VRAM
+    y &= rs12_vram_ymask; // ReSys12: 1024-line VRAM
     do_vram_line(vram, x, y, sdata, w, is_read, r6);
   }
 
   if (h > 0) {
     if (count > 0) {
-      y &= 1023; // ReSys12
+      y &= rs12_vram_ymask; // ReSys12
       do_vram_line(vram, x, y, sdata, count, is_read, r6);
       o = count;
       count = 0;
@@ -638,9 +639,9 @@ static noinline void start_vram_transfer(struct psx_gpu *gpu, uint32_t pos_word,
     log_anomaly(gpu, "start_vram_transfer while old unfinished\n");
 
   gpu->dma.x = pos_word & 0x3ff;
-  gpu->dma.y = (pos_word >> 16) & 0x3ff; // ReSys12: 10-bit Y/height
+  gpu->dma.y = (pos_word >> 16) & rs12_vram_ymask; // ReSys12: 10-bit Y/height
   gpu->dma.w = ((size_word - 1) & 0x3ff) + 1;
-  gpu->dma.h = (((size_word >> 16) - 1) & 0x3ff) + 1;
+  gpu->dma.h = (((size_word >> 16) - 1) & rs12_vram_ymask) + 1;
   gpu->dma.offset = 0;
   gpu->dma.is_read = is_read;
   gpu->dma_start = gpu->dma;
@@ -702,11 +703,11 @@ int do_vram_copy_pre(struct psx_gpu *gpu, const uint32_t *params, int *cpu_cycle
 {
   // ReSys12: 10-bit Y/height (1024-line VRAM)
   const uint32_t sx =  LE32TOH(params[1]) & 0x3FF;
-  const uint32_t sy = (LE32TOH(params[1]) >> 16) & 0x3FF;
+  const uint32_t sy = (LE32TOH(params[1]) >> 16) & rs12_vram_ymask;
   const uint32_t dx =  LE32TOH(params[2]) & 0x3FF;
-  const uint32_t dy = (LE32TOH(params[2]) >> 16) & 0x3FF;
+  const uint32_t dy = (LE32TOH(params[2]) >> 16) & rs12_vram_ymask;
   uint32_t w =  ((LE32TOH(params[3]) - 1) & 0x3FF) + 1;
-  uint32_t h = (((LE32TOH(params[3]) >> 16) - 1) & 0x3FF) + 1;
+  uint32_t h = (((LE32TOH(params[3]) >> 16) - 1) & rs12_vram_ymask) + 1;
   int intersect;
 
   *cpu_cycles = gput_copy(w, h);
@@ -723,11 +724,11 @@ int do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params
 {
   // ReSys12: 10-bit Y/height, rows wrap at 1024
   const uint32_t sx =  LE32TOH(params[1]) & 0x3FF;
-  const uint32_t sy = (LE32TOH(params[1]) >> 16) & 0x3FF;
+  const uint32_t sy = (LE32TOH(params[1]) >> 16) & rs12_vram_ymask;
   const uint32_t dx =  LE32TOH(params[2]) & 0x3FF;
-  const uint32_t dy = (LE32TOH(params[2]) >> 16) & 0x3FF;
+  const uint32_t dy = (LE32TOH(params[2]) >> 16) & rs12_vram_ymask;
   uint32_t w =  ((LE32TOH(params[3]) - 1) & 0x3FF) + 1;
-  uint32_t h = (((LE32TOH(params[3]) >> 16) - 1) & 0x3FF) + 1;
+  uint32_t h = (((LE32TOH(params[3]) >> 16) - 1) & rs12_vram_ymask) + 1;
   uint16_t msb = ex_regs[6] << 15;
   uint16_t lbuf[128];
   uint32_t x, y;
@@ -738,8 +739,8 @@ int do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params
   {
     for (y = 0; y < h; y++)
     {
-      const uint16_t *src = VRAM_MEM_XY(vram, 0, (sy + y) & 0x3ff); // ReSys12
-      uint16_t *dst = VRAM_MEM_XY(vram, 0, (dy + y) & 0x3ff);
+      const uint16_t *src = VRAM_MEM_XY(vram, 0, (sy + y) & rs12_vram_ymask); // ReSys12
+      uint16_t *dst = VRAM_MEM_XY(vram, 0, (dy + y) & rs12_vram_ymask);
       for (x = 0; x < w; x += ARRAY_SIZE(lbuf))
       {
         uint32_t x1, w1 = w - x;
@@ -756,8 +757,8 @@ int do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params
   {
     uint32_t sy1 = sy, dy1 = dy;
     for (y = 0; y < h; y++, sy1++, dy1++) {
-      memcpy(VRAM_MEM_XY(vram, dx, dy1 & 0x3ff), // ReSys12
-             VRAM_MEM_XY(vram, sx, sy1 & 0x3ff), w * 2);
+      memcpy(VRAM_MEM_XY(vram, dx, dy1 & rs12_vram_ymask), // ReSys12
+             VRAM_MEM_XY(vram, sx, sy1 & rs12_vram_ymask), w * 2);
     }
   }
 
@@ -790,7 +791,7 @@ static noinline int do_cmd_list_skip(struct psx_gpu *gpu, uint32_t *data, int li
     switch (cmd) {
       case 0x02:
         w = ((LE16TOH(slist[4]) & 0x3ff) + 0xf) & ~0xf;
-        h =   LE16TOH(slist[5]) & 0x3ff; // ReSys12: 10-bit fill height
+        h =   LE16TOH(slist[5]) & rs12_vram_ymask; // ReSys12: 10-bit fill height
         if (w > gpu->screen.w || h > gpu->screen.h)
         {
           // clearing something large, don't skip
@@ -815,8 +816,8 @@ static noinline int do_cmd_list_skip(struct psx_gpu *gpu, uint32_t *data, int li
       case 0x3c ... 0x3f: gput_sum(cyc_sum, cyc, gput_quad_base_gt());
       do_texpage:
         // ReSys12: tpage bit 11 = texture page Y + 512 on System 12
-        gpu->ex_regs[1] &= ~0x9ff;
-        gpu->ex_regs[1] |= (LE32TOH(list[4 + ((cmd >> 4) & 1)]) >> 16) & 0x9ff;
+        gpu->ex_regs[1] &= ~RS12_TPAGE_MASK;
+        gpu->ex_regs[1] |= (LE32TOH(list[4 + ((cmd >> 4) & 1)]) >> 16) & RS12_TPAGE_MASK;
         gpu->frameskip.ecmds_dirty_renderer = 1;
         break;
       case 0x40 ... 0x47:
@@ -868,7 +869,7 @@ static noinline int do_cmd_list_skip(struct psx_gpu *gpu, uint32_t *data, int li
       case 0x7C ... 0x7f: gput_sum(cyc_sum, cyc, gput_sprite(16, 16)); break;
       case 0x80 ... 0x9f: // vid -> vid
         w = ((LE16TOH(slist[6]) - 1) & 0x3ff) + 1;
-        h = ((LE16TOH(slist[7]) - 1) & 0x3ff) + 1; // ReSys12
+        h = ((LE16TOH(slist[7]) - 1) & rs12_vram_ymask) + 1; // ReSys12
         gput_sum(cyc_sum, cyc, gput_copy(w, h));
         break;
       case 0xa0 ... 0xbf: // sys -> vid

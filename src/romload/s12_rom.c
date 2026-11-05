@@ -8,16 +8,19 @@
 #include "rs12_zip.h"
 #include "s12_games.h"
 #include "s12_games_0260.h"
+#include "s11_games.h" // ReSys12: System 11 sets, indexes after the System 12 ones
 
 static void (*s_progress)(int permille);
 
 int s12_game_count(void)
 {
-	return S12_NUM_GAMES;
+	return S12_NUM_GAMES + S11_NUM_GAMES;
 }
 
 const S12Game *s12_game(int index)
 {
+	if (index >= S12_NUM_GAMES && index < S12_NUM_GAMES + S11_NUM_GAMES)
+		return &s11_games[index - S12_NUM_GAMES];
 	return (index >= 0 && index < S12_NUM_GAMES) ? &s12_games[index] : NULL;
 }
 
@@ -26,7 +29,16 @@ int s12_find_game(const char *name)
 	for (int i = 0; i < S12_NUM_GAMES; i++)
 		if (strcmp(s12_games[i].name, name) == 0)
 			return i;
+	for (int i = 0; i < S11_NUM_GAMES; i++)
+		if (strcmp(s11_games[i].name, name) == 0)
+			return S12_NUM_GAMES + i;
 	return -1;
+}
+
+// the ROM table of a set (System 11 sets have their own)
+static const S12RomEntry *roms_of(const S12Game *g)
+{
+	return g >= s11_games && g < s11_games + S11_NUM_GAMES ? s11_roms : s12_roms;
 }
 
 static uint32_t region_size(const S12Game *g, const S12RomEntry *roms, int rgn)
@@ -187,7 +199,8 @@ static int load_with(S12Rom *r, const S12Game *meta, const S12Game *g, const S12
 			continue;
 		}
 		last_size = size;
-		place(dst, dsz, e, last_data, size);
+		// (ROM_CONTINUE of identical halves, System 11 dunkmnia / primglex: e->size bytes of a bigger file)
+		place(dst, dsz, e, last_data, size < e->size ? size : e->size);
 	}
 	free(last_data);
 	zip_close(&zips[0]);
@@ -226,8 +239,22 @@ static void load_iocpu_extra(S12Rom *r, const char *roms_dir)
 	Zip z;
 	char path[512];
 	snprintf(path, sizeof(path), "%s/%s.zip", roms_dir, r->game->name);
-	if (!size || zip_open(&z, path) != 0)
+	if (!size)
 		return;
+	const S12RomEntry *first = &s12_roms_0260[o->rom_start];
+	while (first->region != S12_RGN_IOCPU)
+		first++;
+	Zip *owner;
+	int by_name;
+	if (zip_open(&z, path) != 0 || !find_in(&z, 1, first, &owner, &by_name)) {
+		// current MAME romsets: the ROM is in the board device's own zip (technodr: namco_emio102.zip)
+		zip_close(&z);
+		if (r->game->machine != S12_M_TECHNODR)
+			return;
+		snprintf(path, sizeof(path), "%s/namco_emio102.zip", roms_dir);
+		if (zip_open(&z, path) != 0)
+			return;
+	}
 	uint8_t *dst = (uint8_t *)calloc(1, size);
 	for (int k = 0; dst && k < o->rom_count; k++) {
 		const S12RomEntry *e = &s12_roms_0260[o->rom_start + k];
@@ -253,6 +280,36 @@ static void load_iocpu_extra(S12Rom *r, const char *roms_dir)
 	}
 }
 
+// ReSys12: System 11 C76 internal BIOS (c76.bin) into the I/O CPU region: from the set's zip, else the MCU
+// device's own zip next to it (MAME namcoc76.zip), as namco_emio102.zip above
+static int load_c76_bios(S12Rom *r, const char *roms_dir, char *msg, int msg_len)
+{
+	static const S12RomEntry bios = { S12_RGN_IOCPU, S12_LD_PLAIN, 0, 0, 0x4000, 0x399faac7, "c76.bin" };
+	const char *zips[2] = { r->game->name, "namcoc76" };
+	for (int k = 0; k < 2; k++) {
+		char path[512];
+		Zip z;
+		Zip *owner;
+		int by_name;
+		uint32_t n = 0;
+		snprintf(path, sizeof(path), "%s/%s.zip", roms_dir, zips[k]);
+		if (zip_open(&z, path) != 0)
+			continue;
+		const ZipEntry *ze = find_in(&z, 1, &bios, &owner, &by_name);
+		uint8_t *data = ze ? zip_read(owner, ze, &n) : NULL;
+		zip_close(&z);
+		if (data && n == bios.size) {
+			r->rgn[S12_RGN_IOCPU] = data;
+			r->rgn_size[S12_RGN_IOCPU] = n;
+			return 0;
+		}
+		free(data);
+	}
+	snprintf(msg, msg_len, "missing %s/namcoc76.zip (c76.bin, crc %08x)", roms_dir, (unsigned)bios.crc);
+	s12_rom_free(r);
+	return -4;
+}
+
 // ReSys12: the main table comes from current MAME; romsets made with MAME 0.260 have other dumps of some sets
 // (e.g. soulclbr, tektagtjc1). If the main table misses files or matches some only by name, try the 0.260 lists.
 int s12_rom_load(S12Rom *r, const char *roms_dir, const char *name, char *msg, int msg_len)
@@ -263,8 +320,10 @@ int s12_rom_load(S12Rom *r, const char *roms_dir, const char *name, char *msg, i
 		snprintf(msg, msg_len, "unknown set %s", name);
 		return -1;
 	}
-	const S12Game *g = &s12_games[gi];
-	int rc = load_with(r, g, g, s12_roms, roms_dir, msg, msg_len);
+	const S12Game *g = s12_game(gi);
+	int rc = load_with(r, g, g, roms_of(g), roms_dir, msg, msg_len);
+	if (rc == 0 && g->machine == S12_M_S11)
+		return load_c76_bios(r, roms_dir, msg, msg_len);
 	if (rc == 0 && !r->by_name) {
 		load_iocpu_extra(r, roms_dir);
 		return 0;
@@ -350,7 +409,7 @@ static uint64_t cache_key(const S12Game *g, const char *roms_dir)
 		fnv64(&h, "iocpu", 5); // caches from before the optional I/O ROM (load_iocpu_extra)
 	// the set's load table (both lists): a corrected offset (tools/gen_s12_games.py OFFSET_FIX) rebuilds the cache
 	for (int i = 0; i < g->rom_count; i++)
-		hash_entry(&h, &s12_roms[g->rom_start + i]);
+		hash_entry(&h, &roms_of(g)[g->rom_start + i]);
 	for (size_t i = 0; i < sizeof(s12_games_0260) / sizeof(s12_games_0260[0]); i++)
 		if (!strcmp(s12_games_0260[i].name, g->name)) {
 			for (int k = 0; k < s12_games_0260[i].rom_count; k++)
@@ -714,7 +773,7 @@ int s12_rom_load_cached(S12Rom *r, const char *roms_dir, const char *cache_dir, 
 	const int gi = s12_find_game(name);
 	if (gi < 0 || !cache_dir)
 		return s12_rom_load(r, roms_dir, name, msg, msg_len);
-	const S12Game *g = &s12_games[gi];
+	const S12Game *g = s12_game(gi);
 	const uint64_t key = cache_key(g, roms_dir);
 	if (!key)
 		return s12_rom_load(r, roms_dir, name, msg, msg_len); // reports the missing zip

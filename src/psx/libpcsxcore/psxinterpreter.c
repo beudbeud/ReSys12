@@ -27,6 +27,10 @@
 #include "gte.h"
 #include "psxhle.h"
 #include "psxinterpreter.h"
+#ifdef RS12_HARNESS
+#include <stdio.h>
+#include <stdlib.h>
+#endif
 #include "s12_hle.h" // ReSys12: game routines run natively
 #include <stddef.h>
 #include <assert.h>
@@ -403,8 +407,15 @@ static void psxDoDelayBranch(psxRegisters *regs, u32 tar1, u32 code1) {
 	SysPrintf("Evil chained DS branches @ %08x %08x %08x\n", regs->pc, tar1, tar2);
 }
 
+#ifdef RS12_TRACE
+static u32 rs12_trace_prev_code;
+static int rs12_trace_branched;
+#endif
 static void doBranch(psxRegisters *regs, u32 tar, enum R3000Abdt taken) {
 	u32 code, pc, pc_final;
+#ifdef RS12_TRACE
+	rs12_trace_branched = 1;
+#endif
 
 	regs->branchSeen = regs->branching = taken;
 	pc_final = taken == R3000A_BRANCH_TAKEN ? tar : regs->pc + 4;
@@ -1175,6 +1186,15 @@ static inline void execI_(
 {
 	u32 pc = regs->pc;
 
+#ifdef RS12_TRACE
+	{ // state before the instruction, as the recompiler's compare points; none in a delay slot (a taken branch runs
+	  // its slot inside doBranch, a not taken one lets it come here)
+		extern void do_insn_trace(void);
+		if (!(isBranch(rs12_trace_prev_code) && !rs12_trace_branched))
+			do_insn_trace();
+		rs12_trace_branched = 0;
+	}
+#endif
 	addCycle(regs);
 	dloadStep(regs);
 
@@ -1182,6 +1202,22 @@ static inline void execI_(
 	regs->code = fetch(regs, memRLUT, pc);
 	if (unlikely(pc == rs12_hle_lz_head)) // ReSys12: a game routine run natively (s12_hle.c)
 		regs->code = RS12_HLE_OP | RS12_HLE_CODE_LZ;
+#ifdef RS12_TRACE
+	rs12_trace_prev_code = regs->code;
+#endif
+#ifdef RS12_HARNESS
+	{ // diagnostics: RS12_PCLOG=from,to (cycles) prints the instructions run in that window
+		static u32 from = 1, to;
+		if (from == 1) {
+			const char *e = getenv("RS12_PCLOG");
+			from = 0;
+			if (e && sscanf(e, "%u,%u", &from, &to) != 2)
+				from = to = 0;
+		}
+		if (from && regs->cycle >= from && regs->cycle < to)
+			fprintf(stderr, "pclog %u %08x %08x v0=%08x v1=%08x a0=%08x a1=%08x s0=%08x s1=%08x\n", regs->cycle, pc, regs->code, regs->GPR.r[2], regs->GPR.r[3], regs->GPR.r[4], regs->GPR.r[5], regs->GPR.r[16], regs->GPR.r[17]);
+	}
+#endif
 	psxBSC[regs->code >> 26](regs, regs->code);
 }
 

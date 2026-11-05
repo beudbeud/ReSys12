@@ -100,7 +100,7 @@ static void set_texture(psx_gpu_struct *psx_gpu, u32 texture_settings)
   // 0-3 = X / 64, 4 = Y bit 8 (tpage bit 4), 5 = Y bit 9 (tpage bit 11).
   // Bits 12/13 flip textured rectangles (x / y), from any tpage like MAME's decode_tpage (tenkomor's text)
   psx_gpu->rect_flip = (texture_settings >> 12) & 3;
-  texture_settings &= 0x9FF;
+  texture_settings &= RS12_TPAGE_MASK;
   if(psx_gpu->texture_settings != texture_settings)
   {
     u32 new_texture_page = (texture_settings & 0x1F) |
@@ -145,7 +145,7 @@ static void set_texture(psx_gpu_struct *psx_gpu, u32 texture_settings)
 
 static void set_clut(psx_gpu_struct *psx_gpu, u32 clut_settings)
 {
-  clut_settings &= 0xFFFF; // ReSys12: 10-bit CLUT Y (bits 6-15), 1024-line VRAM
+  clut_settings &= rs12_vram_ymask > 511 ? 0xFFFF : 0x7FFF; // ReSys12: 10-bit CLUT Y (bits 6-15), 1024-line VRAM
   if (psx_gpu->clut_settings != clut_settings)
   {
     flush_render_block_buffer(psx_gpu);
@@ -229,9 +229,9 @@ static void do_fill(psx_gpu_struct *psx_gpu, u32 x, u32 y,
     u32 width_a = 1024 - x;
     u32 width_b = width - width_a;
 
-    if(unlikely((y + height) > 1024)) // ReSys12: fills wrap at line 1024
+    if(unlikely((y + height) > rs12_vram_ymask + 1)) // ReSys12: fills wrap at line 1024
     {
-      u32 height_a = 1024 - y;
+      u32 height_a = rs12_vram_ymask + 1 - y;
       u32 height_b = height - height_a;
 
       render_block_fill(psx_gpu, color, x, y, width_a, height_a);
@@ -247,9 +247,9 @@ static void do_fill(psx_gpu_struct *psx_gpu, u32 x, u32 y,
   }
   else
   {
-    if(unlikely((y + height) > 1024)) // ReSys12: fills wrap at line 1024
+    if(unlikely((y + height) > rs12_vram_ymask + 1)) // ReSys12: fills wrap at line 1024
     {
-      u32 height_a = 1024 - y;
+      u32 height_a = rs12_vram_ymask + 1 - y;
       u32 height_b = height - height_a;
 
       render_block_fill(psx_gpu, color, x, y, width, height_a);
@@ -960,9 +960,9 @@ u32 gpu_parse(psx_gpu_struct *psx_gpu, u32 *list, u32 size, u32 *ex_regs,
       case 0x02:
       {
         u32 x = list_s16[2] & 0x3FF;
-        u32 y = list_s16[3] & 0x3FF; // ReSys12: 10-bit Y/height (1024 lines)
+        u32 y = list_s16[3] & rs12_vram_ymask; // ReSys12: 10-bit Y/height (1024 lines)
         u32 width = list_s16[4] & 0x3FF;
-        u32 height = list_s16[5] & 0x3FF;
+        u32 height = list_s16[5] & rs12_vram_ymask;
         u32 color = list[0] & 0xFFFFFF;
 
         do_fill(psx_gpu, x, y, width, height, color);
@@ -1377,7 +1377,7 @@ u32 gpu_parse(psx_gpu_struct *psx_gpu, u32 *list, u32 size, u32 *ex_regs,
       case 0xE3:
       {
         s16 viewport_start_x = list[0] & 0x3FF;
-        s16 viewport_start_y = (list[0] >> 10) & 0x3FF; // ReSys12: 10-bit draw area Y
+        s16 viewport_start_y = (list[0] >> 10) & rs12_vram_ymask; // ReSys12: 10-bit draw area Y
 
         // ReSys12: compare with the draw area as programmed (split rendering
         // keeps the band-clipped range in viewport_start_y)
@@ -1413,7 +1413,7 @@ u32 gpu_parse(psx_gpu_struct *psx_gpu, u32 *list, u32 size, u32 *ex_regs,
       case 0xE4:
       {
         s16 viewport_end_x = list[0] & 0x3FF;
-        s16 viewport_end_y = (list[0] >> 10) & 0x3FF; // ReSys12: 10-bit draw area Y
+        s16 viewport_end_y = (list[0] >> 10) & rs12_vram_ymask; // ReSys12: 10-bit draw area Y
 
         // ReSys12: compare with the draw area as programmed (see E3)
         if(viewport_end_x == psx_gpu->viewport_end_x &&

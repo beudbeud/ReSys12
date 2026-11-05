@@ -8,7 +8,9 @@
 // JVS: the I/O boards of aplarail / technodr / questff on SCI0 (s12_jvs.c); the other sets have none (sense = None).
 // Timing: the H8 runs at 16934400 Hz = main CPU clock / 2. It is caught up to the main CPU time on every PSXINT_S12
 // event (S12_SUB_QUANTUM main cycles) and on every VBLANK edge.
+#include "s12_cdxa.h"
 #include "s12.h"
+#include "s12_link.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -24,6 +26,7 @@
 #include "s12_sound.h"
 #include "c352.h"
 #include "s12_rom.h"
+#include "s11.h"
 
 // main CPU cycles between two sub CPU slices (~4 scanlines: each slice leaves the recompiled code, 2150 cost 1.7ms a
 // frame in tektagt fights; MAME sets no interleave for this board). The frontend may change it for measurements
@@ -328,6 +331,8 @@ static void catch_up(void)
 		if (sub.jvs.tx_pos < sub.jvs.tx_len)
 			s12_jvs_update(&sub.jvs, h8_total_cycles());
 	}
+	if (s12.cdxa)
+		s12_cdxa_run(now);
 }
 
 // C352 key-on: the wave ROM may still be read in the background (Vita ROM cache, s12_rom.c)
@@ -443,6 +448,12 @@ void s12_pchist_dump(void)
 
 void s12_event(void)
 {
+	if (s12.s11) {
+		s11_event();
+		return;
+	}
+	if (s12.game && s12.game->state == S12_S_KARTDUEL)
+		s12_link_sync();
 #ifdef RS12_SUB_PROFILE
 	// RS12_PCHIST=<frame>: sample from that frame on
 	extern unsigned int frame_counter;
@@ -457,6 +468,10 @@ void s12_event(void)
 
 void s12_vblank(int state)
 {
+	if (s12.s11) {
+		s11_vblank(state);
+		return;
+	}
 	catch_up();
 	h8_set_irq_line(1, state);
 	h8_adtrg_w(state);

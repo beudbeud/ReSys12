@@ -390,8 +390,8 @@ int renderer_do_cmd_list(uint32_t *list, int count, uint32_t *ex_regs,
             cycles_sum, cycles_last, (u32 *)last_cmd);
 
   // ReSys12: keep tpage bit 11 (texture page Y + 512 on the System 12 GPU)
-  ex_regs[1] &= ~0x9ff;
-  ex_regs[1] |= egpu.texture_settings & 0x9ff;
+  ex_regs[1] &= ~RS12_TPAGE_MASK;
+  ex_regs[1] |= egpu.texture_settings & RS12_TPAGE_MASK;
   return ret;
 }
 

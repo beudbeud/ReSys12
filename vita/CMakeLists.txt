@@ -56,6 +56,14 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/s12/s12_hle.c
   ${RS12_ROOT}/src/s12/s12_sound.c
   ${RS12_ROOT}/src/s12/s12_state.c
+  ${RS12_ROOT}/src/s12/s12_link.c
+  ${RS12_ROOT}/src/s12/s12_cdxa.c
+  ${RS12_ROOT}/src/s12/s12_cdmix.c
+  ${RS12_ROOT}/src/s12/s12_atapi.c
+  ${RS12_ROOT}/src/s11/s11.c
+  ${RS12_ROOT}/src/m37710/m37710.c
+  ${RS12_ROOT}/src/s11/s11_c76.c
+  ${RS12_ROOT}/src/sh2/sh2.c
   ${RS12_ROOT}/src/h8/h8.c
   ${RS12_ROOT}/src/h8/h8_periph.c
   ${RS12_ROOT}/src/sound/c352.c
@@ -63,8 +71,19 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/romload/rs12_zip.c
   ${RS12_ROOT}/src/romload/junzip.c
 )
-target_include_directories(rs12_core PUBLIC ${RS12_PSX_INCLUDES} ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound
-  ${RS12_ROOT}/src/h8)
+# kartduel link CPU: src/h8 built a second time with its symbols renamed (src/h8/h8_link_names.h)
+add_library(rs12_h8link OBJECT ${RS12_ROOT}/src/h8/h8.c ${RS12_ROOT}/src/h8/h8_periph.c)
+target_compile_options(rs12_h8link PRIVATE -include ${RS12_ROOT}/src/h8/h8_link_names.h -marm)
+target_include_directories(rs12_h8link PRIVATE ${RS12_ROOT}/src/h8 ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound ${RS12_PSX_INCLUDES})
+target_sources(rs12_core PRIVATE $<TARGET_OBJECTS:rs12_h8link>)
+target_include_directories(rs12_core PUBLIC ${RS12_PSX_INCLUDES} ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/s11 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound
+  ${RS12_ROOT}/src/h8 ${RS12_ROOT}/src/sh2)
+# CDXA disc images: libchdr on the vitasdk zlib and zstd (the app links them too, a bundled copy would define them twice)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(WITH_SYSTEM_ZLIB ON CACHE BOOL "" FORCE)
+set(WITH_SYSTEM_ZSTD ON CACHE BOOL "" FORCE)
+add_subdirectory(${RS12_ROOT}/deps/libchdr ${CMAKE_BINARY_DIR}/libchdr EXCLUDE_FROM_ALL)
+target_link_libraries(rs12_core PUBLIC chdr-static)
 # pcsx_rearmed's Vita shims (sys/mman.h etc.), as -Ifrontend/vita in Makefile.libretro
 target_include_directories(rs12_core PRIVATE ${RS12_PSX}/frontend/vita)
 # ari64 recompiler on. HAVE_NEON_ASM: NEON GTE paths, as Makefile.libretro platform=vita

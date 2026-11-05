@@ -309,8 +309,8 @@ void psxMemMapRead(u32 phys, u32 size, u8 *mem)
 	uintptr_t *lut = psxRegs.ptrs.memRLUT;
 	static const u32 segs[3] = { 0x00000000u, 0x80000000u, 0xa0000000u };
 	u32 s, i;
-#ifndef DRC_DISABLE
-	new_dyna_pcsx_mem_map_read(phys, size, mem); // same window in the recompiler's tables
+#if !defined(DRC_DISABLE) && !defined(LIGHTREC)
+	new_dyna_pcsx_mem_map_read(phys, size, mem); // same window in the recompiler's tables (lightrec: its handlers read the LUT)
 #endif
 	if (DISABLE_MEM_LUTS || !lut)
 		return;
@@ -424,8 +424,8 @@ static void rs12_watch(psxRegisters *regs, u32 mem, u32 value, int size)
 			fclose(f);
 		}
 	}
-	fprintf(stderr, "watch w%d %08x = %08x @pc %08x a0 %08x a1 %08x t1 %08x ra %08x\n", size, mem, value, regs->pc,
-		regs->GPR.n.a0, regs->GPR.n.a1, regs->GPR.n.t1, regs->GPR.n.ra);
+	fprintf(stderr, "watch w%d %08x = %08x @pc %08x a0 %08x a1 %08x t1 %08x ra %08x cycle %u f%u\n", size, mem, value, regs->pc,
+		regs->GPR.n.a0, regs->GPR.n.a1, regs->GPR.n.t1, regs->GPR.n.ra, regs->cycle, frame_counter);
 }
 #endif
 

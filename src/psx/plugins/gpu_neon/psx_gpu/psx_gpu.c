@@ -372,10 +372,10 @@ void update_texture_cache_region(psx_gpu_struct *psx_gpu, u32 x1, u32 y1,
 {
   s32 w = x2 - x1;
   // ReSys12: VRAM transfers wrap at line 1024; invalidate the wrapped part too
-  if (unlikely(y2 > 1023))
+  if (unlikely(y2 > (u32)rs12_vram_ymask))
   {
-    update_texture_cache_region(psx_gpu, x1, 0, x2, y2 - 1024);
-    y2 = 1023;
+    update_texture_cache_region(psx_gpu, x1, 0, x2, y2 - rs12_vram_ymask - 1);
+    y2 = rs12_vram_ymask;
   }
   do
   {
@@ -5339,7 +5339,9 @@ void initialize_psx_gpu(psx_gpu_struct *psx_gpu, u16 *vram)
 
   // check some offsets, asm relies on these
   psx_gpu->reserved_a[(offsetof(psx_gpu_struct, test_mask) == 0) - 1] = 0;
+#if defined(__arm__) // ReSys12: the offsets are those of the ARMv7 assembly (psx_gpu_arm_neon.S), 64-bit builds use C
   psx_gpu->reserved_a[(offsetof(psx_gpu_struct, blocks) == psx_gpu_blocks_offset) - 1] = 0;
+#endif
 #if defined(__arm__) && defined(NEON_BUILD)
   // ReSys12: the struct layout changed (u64 page masks); catch a stale
   // psx_gpu_offsets.h at compile time

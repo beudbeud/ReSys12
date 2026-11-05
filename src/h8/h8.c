@@ -140,6 +140,12 @@ static inline void mem_write8(uint32_t a, uint8_t d)
 	H8PH_LEAVE();
 }
 
+// DMAC transfers (h8_periph.c) go through the same bus as the CPU
+uint8_t h8_bus_read8(uint32_t a) { return mem_read8(a); }
+uint16_t h8_bus_read16(uint32_t a) { return mem_read16(a); }
+void h8_bus_write8(uint32_t a, uint8_t d) { mem_write8(a, d); }
+void h8_bus_write16(uint32_t a, uint16_t d) { mem_write16(a, d); }
+
 // ReSys12: instruction fetches come from the program ROM almost always; it is kept pre-swapped as host-order words
 // (s_rom16) so a fetch is one load instead of the generic address decode and two byte loads
 static uint16_t *s_rom16;
@@ -963,7 +969,7 @@ static void blk_run(const H8Blk *b)
 	blk_exit_end(&b->ins[b->n - 1]); // (no instruction changing PC at the end)
 }
 
-#if defined(__arm__)
+#if defined(__arm__) && !defined(H8_NO_JIT)
 #include "h8_jit_arm.inc"
 #else
 int h8_jit_enable, h8_jit_native, h8_jit_chain, h8_jit_prof, h8_jit_link, h8_jit_max;

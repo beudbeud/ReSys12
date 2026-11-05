@@ -1,6 +1,7 @@
 // ReSys12: Namco System 12 board (main CPU side): ROM banking, ROM DMA (channel 5), shared RAM, EEPROM, KC044 protection.
 // Behaviour follows MAME src/mame/namco/namcos12.cpp (BSD-3-Clause, copyright smf and contributors).
 #include "s12.h"
+#include "s12_link.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +13,11 @@
 #include "r3000a.h"
 #include "s12_bus.h"
 #include "s12_hle.h"
+#include "s12_cdxa.h"
+#include "s11.h"
 
 S12Board s12;
-static uint16_t s_link_ram[0x8000], s_link_regs[16]; // kartduel link board (kartduel_ram)
+static uint16_t s_link_regs[16]; // kartduel link board registers (kartduel_ram)
 
 #define BANK_SIZE 0x200000u
 
@@ -50,7 +53,7 @@ void s12_attach(S12Rom *rom)
 	(void)s_ndrc_subst;
 #endif
 	memset(&s12, 0, sizeof(s12));
-	memset(s_link_ram, 0, sizeof(s_link_ram));
+	s12_link_reset();
 	memset(s_link_regs, 0, sizeof(s_link_regs));
 	s12.rom = rom;
 	s12.game = rom->game;
@@ -58,6 +61,8 @@ void s12_attach(S12Rom *rom)
 	s12.alt_bank = (st == S12_S_ALTBANK || st == S12_S_CDXA || st == S12_S_GOLGO13 || st == S12_S_TRUCKK);
 	s12.tektagt = (st == S12_S_TEKTAGT);
 	const int m = rom->game->machine;
+	s12.s11 = (m == S12_M_S11);
+	s12.cdxa = (m == S12_M_CDXA || m == S12_M_QUESTFF || m == S12_M_TRUCKK);
 	s12.boot_hack = (m == S12_M_COH700B || m == S12_M_COH716 || m == S12_M_CDXA || m == S12_M_QUESTFF ||
 		m == S12_M_GOLGO13 || m == S12_M_TRUCKK || m == S12_M_KARTDUEL);
 	s12.bank_count = rom->rgn_size[S12_RGN_BANK] / BANK_SIZE;
@@ -86,6 +91,8 @@ void s12_attach(S12Rom *rom)
 		memcpy(s12.eeprom, rom->rgn[S12_RGN_EEPROM], sizeof(s12.eeprom));
 	else
 		memset(s12.eeprom, 0xff, sizeof(s12.eeprom));
+	if (s12.s11)
+		s11_attach(rom);
 }
 
 // ---- ROM bank window 0x1fa00000-0x1fbfffff ----
@@ -140,6 +147,11 @@ void s12_mem_reset(void)
 		if (n > PSX_ROM_SIZE)
 			n = PSX_ROM_SIZE;
 		memcpy(psxRegs.ptrs.psxR, r->rgn[S12_RGN_MAIN], n);
+		if (s12.s11) { // System 11: its own bank windows, no game routines run natively
+			rs12_hle_lz_head = 0;
+			s11_mem_reset();
+			return;
+		}
 		// game routines run natively (s12_hle.c), unless the harness's RS12_NOHLE (comparisons)
 #ifdef RS12_HARNESS
 		if (getenv("RS12_NOHLE"))
@@ -182,6 +194,8 @@ void s12_board_state_load(const void *src)
 	s12.rom = rom;
 	s12.game = game;
 	s12.in = in;
+	if (s12.s11) // (s11_state_load maps its windows)
+		return;
 	map_bank();
 	if (s12.tektagt)
 		psxMemMapRead(0x1ff00000u, 0x80000u, NULL);
@@ -189,9 +203,17 @@ void s12_board_state_load(const void *src)
 
 void s12_cpu_reset(void)
 {
+	if (s12.s11) {
+		s11_cpu_reset();
+		return;
+	}
 	// MAME coh700b: "12 bytes in ram are checked early in the boot sequences, how it gets into memory is not currently known"
 	if (s12.boot_hack && s12.rom && s12.rom->rgn[S12_RGN_MAIN])
 		memcpy(psxRegs.ptrs.psxM + 0x10000, s12.rom->rgn[S12_RGN_MAIN] + 0x20280, 12);
+	if (s12.cdxa)
+		s12_cdxa_reset();
+	s12_link_reset(); // (its CPU held in reset: a running one would catch up the main CPU's cycle count from before)
+	memset(s_link_regs, 0, sizeof(s_link_regs));
 	s12_sub_reset();
 }
 
@@ -258,7 +280,7 @@ void s12_dump_unmapped(void)
 static uint16_t *kartduel_ram(uint32_t a)
 {
 	if (a >= 0x1f780000u && a < 0x1f790000u)
-		return &s_link_ram[(a - 0x1f780000u) >> 1];
+		return &s12_link_ram[(a - 0x1f780000u) >> 1];
 	if (a >= 0x1f796004u && a < 0x1f79600cu)
 		return &s_link_regs[(a - 0x1f796004u) >> 1];      // 0..3
 	if (a >= 0x1f796014u && a < 0x1f796018u)
@@ -273,6 +295,15 @@ static uint16_t *kartduel_ram(uint32_t a)
 // ---- 16-bit bus (everything on the System 12 expansion bus is 16 bits wide in MAME) ----
 static uint16_t board_r16(uint32_t a)
 {
+	uint16_t cv;
+	if (s12.s11) {
+		if (s11_r16(a, &cv))
+			return cv;
+		note_unmapped(a, 0);
+		return 0;
+	}
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f800000u && s12_cdxa_r16(a, &cv))
+		return cv;
 	if (a >= 0x1f080000u && a < 0x1f084000u)
 		return s12.shared[(a - 0x1f080000u) >> 1];
 	if (a >= 0x1f140000u && a < 0x1f141000u) {
@@ -300,8 +331,14 @@ static uint16_t board_r16(uint32_t a)
 	}
 	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
 		uint16_t *r = kartduel_ram(a);
-		if (r)
+		if (r) {
+			s12_link_sync();
+#ifdef RS12_HARNESS
+			if (getenv("RS12_LINKLOG") && (a - 0x1f780000u >= 0x1000u || a >= 0x1f790000u))
+				fprintf(stderr, "main r %08x %04x pc %08x\n", a, *r, psxRegs.pc);
+#endif
 			return *r;
+		}
 	}
 	if (a >= 0x1fa00000u && a < 0x1fc00000u)
 		return bank_read16(a);
@@ -315,10 +352,17 @@ static uint16_t board_r16(uint32_t a)
 
 static void board_w16(uint32_t a, uint16_t d)
 {
+	if (s12.s11) {
+		if (!s11_w16(a, d))
+			note_unmapped(a, 1);
+		return;
+	}
 	if (a == 0x1f000000u) {
 		bankoffset_w(d);
 		return;
 	}
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f800000u && s12_cdxa_w16(a, d))
+		return;
 	if (a >= 0x1f080000u && a < 0x1f084000u) {
 		s12.shared[(a - 0x1f080000u) >> 1] = d;
 		return;
@@ -352,11 +396,18 @@ static void board_w16(uint32_t a, uint16_t d)
 	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
 		uint16_t *r = kartduel_ram(a);
 		if (r) {
+			s12_link_sync();
+#ifdef RS12_HARNESS
+			if (getenv("RS12_LINKLOG") && (a - 0x1f780000u >= 0x1000u || a >= 0x1f790000u))
+				fprintf(stderr, "main w %08x %04x pc %08x\n", a, d, psxRegs.pc);
+#endif
 			*r = d;
 			return;
 		}
-		if ((a & ~3u) == 0x1f796000u)
-			return; // link CPU reset line (the link CPU is not emulated, as MAME without a LAN peer)
+		if ((a & ~3u) == 0x1f796000u) {
+			s12_link_reset_line(a & 2);
+			return;
+		}
 	}
 	// MAME nopw: 0x1f008000, 0x1f010000, 0x1f018000, 0x1f1bff08-0f, and the program flash
 	if ((a & ~3u) == 0x1f008000u || (a & ~3u) == 0x1f010000u || (a & ~3u) == 0x1f018000u ||
@@ -391,9 +442,22 @@ void s12_write8(uint32_t phys, uint32_t v)
 {
 	// byte writes reach 16-bit devices as a word with the byte in its lane
 	const uint32_t a = phys & ~1u;
-	if (a >= 0x1f080000u && a < 0x1f084000u) {
-		uint16_t *w = &s12.shared[(a - 0x1f080000u) >> 1];
+	if (s12.s11) {
+		if (!s11_w8(phys, (uint8_t)v))
+			note_unmapped(a, 1);
+		return;
+	}
+	uint16_t *w = NULL;
+	if (a >= 0x1f080000u && a < 0x1f084000u)
+		w = &s12.shared[(a - 0x1f080000u) >> 1];
+	else if (s12.game && s12.game->state == S12_S_KARTDUEL && (w = kartduel_ram(a)) != NULL) // (memory too)
+		s12_link_sync();
+	if (w) {
 		*w = (phys & 1) ? (uint16_t)((*w & 0x00ff) | ((v & 0xff) << 8)) : (uint16_t)((*w & 0xff00) | (v & 0xff));
+		return;
+	}
+	if (s12.cdxa && a >= 0x1f7c0000u && a < 0x1f7d0000u) {
+		s12_cdxa_w8(phys, (uint8_t)v);
 		return;
 	}
 	board_w16(a, (uint16_t)((phys & 1) ? (v & 0xff) << 8 : (v & 0xff)));
@@ -492,6 +556,8 @@ int s12_analog_kind(const S12Game *g)
 		return S12_ANALOG_WHEEL;
 	if (g->machine == S12_M_APLARAIL)
 		return S12_ANALOG_LEVER;
+	if (g->machine == S12_M_S11 && !strcmp(g->inputs, "pocketrc"))
+		return S12_ANALOG_WHEEL;
 	return S12_ANALOG_NONE;
 }
 
@@ -529,6 +595,11 @@ void s12_set_wheel(float steer, float gas, float brake)
 	const S12Game *g = s12.game;
 	if (!g)
 		return;
+	if (g->machine == S12_M_S11) { // pocketrc: ADC0 wheel 0x38..0xc8 (centre 0x80), ADC1 gas 0..0x7f, both reversed
+		s12.in.adc[0] = lerp_u16((1.0f - steer) * 0.5f, 0x38, 0xc8);
+		s12.in.adc[1] = lerp_u16(1.0f - gas, 0, 0x7f);
+		return;
+	}
 	if (g->machine == S12_M_KARTDUEL) { // ADC 0 brake, 1 gas (0..0x15a), 2 wheel (0xe0..0x320, centre 0x200)
 		s12.in.adc[0] = lerp_u16(brake, 0, 0x15a);
 		s12.in.adc[1] = lerp_u16(gas, 0, 0x15a);
@@ -554,7 +625,10 @@ void s12_set_lever(float v)
 // ---- inputs as the H8 sees them (MAME in_r, JAMMA mode) ----
 uint8_t s12_in_r(int offset)
 {
-	const uint32_t p1 = s12.in.player[0], p2 = s12.in.player[1];
+	uint32_t p1 = s12.in.player[0], p2 = s12.in.player[1];
+	// MAME ujlnow inputs: P2 UP and DOWN are active low on that cabinet ("must be pressed to get rid of I/O errors")
+	if (s12.game && !strcmp(s12.game->name, "ujlnow"))
+		p2 |= S12_IN_UP | S12_IN_DOWN;
 	uint8_t v = 0;
 	switch (offset) {
 	case 0:

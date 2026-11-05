@@ -41,7 +41,8 @@ typedef struct {
 	uint32_t dmaoffset;
 	uint16_t bankoffset;
 	uint32_t bank_entry, bank_count;
-	int alt_bank, boot_hack, tektagt;
+	int alt_bank, boot_hack, tektagt, cdxa;
+	int s11; // a System 11 set: the board is src/s11 (s11.h)
 	// tektagt protection (KC044)
 	int has_tektagt_dma;
 	uint32_t tektagdmaoffset;

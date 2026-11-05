@@ -9,10 +9,10 @@ enum { S12_LD_PLAIN, S12_LD_16_BYTE, S12_LD_16_WORD_SWAP, S12_LD_32_BYTE, S12_LD
 enum { S12_F_NODUMP = 1, S12_F_BADDUMP = 2 };
 // CPU board / machine config (MAME machine_config functions)
 enum { S12_M_COH700, S12_M_COH700B, S12_M_COH716, S12_M_APLARAIL, S12_M_TECHNODR, S12_M_CDXA, S12_M_QUESTFF,
-       S12_M_GOLGO13, S12_M_TRUCKK, S12_M_KARTDUEL };
+       S12_M_GOLGO13, S12_M_TRUCKK, S12_M_KARTDUEL, S12_M_S11 /* System 11 (src/s11, s11_games.h) */ };
 // driver state class (MAME), decides banking and protection
 enum { S12_S_BASE, S12_S_ALTBANK, S12_S_CDXA, S12_S_TEKTAGT, S12_S_PTBLANK2, S12_S_TECHNODR, S12_S_GOLGO13,
-       S12_S_TRUCKK, S12_S_KARTDUEL };
+       S12_S_TRUCKK, S12_S_KARTDUEL, S12_S_S11_ROM8, S12_S_S11_ROM8_64, S12_S_S11_NOBANK /* System 11 maps */ };
 enum { S12_G_NOT_WORKING = 1 };
 
 typedef struct {

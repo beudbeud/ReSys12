@@ -44,6 +44,8 @@
 #include "s12.h"
 #include "s12_rom.h"
 #include "s12_state.h"
+#include "s12_cdxa.h"
+#include "s12_cdmix.h"
 #include "h8.h"
 
 #define DATA_DIR "ux0:data/resys12"
@@ -764,6 +766,8 @@ static int sound_thread(SceSize args, void *argp)
 		S12SoundBatch *b = s_snd_batch;
 		const uint64_t t0 = rs12_time_us();
 		const int n = s12_sound_render(b, buf);
+		if (n > 0 && s12.cdxa)
+			s12_cdmix_mix(buf, n);
 		if (n > 0 && s_rec && !s_rec_ready) {
 			const uint32_t k = s_rec_len + (uint32_t)n <= s_rec_cap ? (uint32_t)n : s_rec_cap - s_rec_len;
 			memcpy(s_rec + (size_t)s_rec_len * 2, buf, (size_t)k * 4);
@@ -786,6 +790,8 @@ static void sound_frame_end(void)
 	S12SoundBatch *prev = s_snd_prev;
 	if (prev)
 		sceKernelWaitSema(s_snd_done, 1, NULL);
+	if (s12.cdxa) // (the sound thread is idle here)
+		s12_cdmix_pull();
 	S12SoundBatch *b = s12_sub_sound_frame(prev);
 	s_snd_batch = b;
 	s_snd_prev = b;
@@ -1285,6 +1291,8 @@ next_game:
 			(unsigned)s12_rom_stage_ms[0], (unsigned)s12_rom_stage_ms[1], (unsigned)s12_rom_stage_ms[2]);
 	}
 	s12_attach(&rom);
+	if (s12.cdxa && s12_cdxa_open_disc(ROM_DIR, game) != 0)
+		RS12_LOG("%s: disc image " ROM_DIR "/%s/*.chd not found (MAME layout)", game, game);
 	eep_load(game);
 	rs12_menu_set_game(game);
 	warm_load(game);
@@ -1302,7 +1310,8 @@ next_game:
 		SceIoStat st;
 		Config.Cpu = sceIoGetstat(DATA_DIR "/nodynarec", &st) >= 0 ? CPU_INTERPRETER : CPU_DYNAREC;
 	}
-	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
+	// CD-XA sets keep the interpreter's rate (libretro.c: the VSync timeouts and the SH2 boot handshake)
+	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC && !s12.cdxa ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
 	{ // measurements: recompiler options from ux0:data/resys12/ndhacks (NDHACK_* bits, e.g. 0x6)
 		FILE *hf = fopen(DATA_DIR "/ndhacks", "r");
 		if (hf) {

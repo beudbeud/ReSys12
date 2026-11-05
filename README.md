@@ -79,14 +79,13 @@ screen are simplified when that buys speed.
 Set names are the MAME set names. ROMs must match the MAME romset (see [ROM sets](#rom-sets)); clone sets read missing
 files from the parent zip. System 12 has no BIOS.
 
-**Status**: *Playable*, *Partial* or *Not working* on a PS Vita at 444 MHz. *Partial* sets run, but a known problem
-remains (listed in the notes). Full speed is 60 fps (59.94 Hz).
+**Status**: on a Raspberry Pi 5 with the libretro core (ari64 recompiler, see [libretro core](#libretro-core-linux-raspberry-pi-5)).
+*Playable*: a game was played through; *Boots*: start-up, attract mode and menus work, gameplay not reached in the test
+runs yet; *Partial*: runs, with the known problem in the notes; *Not working* / *Untested* as written. Every set runs
+well above full speed there (9000 frames: tektagt 12.7 s, kartduel 13.4 s, ujlnow 56.9 s; 150 s of play each).
 
-**FPS**: emulated frames per second measured on a PS Vita at 444 MHz in a gameplay scene (30 seconds with the
-buttons pressed, latest measurement). Some games draw fewer new pictures than that on purpose (noted).
-
-**Fourth CPU core**: the table was measured with the Vita's fourth CPU core open to apps. A Vita normally leaves apps
-three cores, and the fourth stays closed unless a plugin opens it.
+**Fourth CPU core (PS Vita)**: the Vita frame rates were measured with the Vita's fourth CPU core open to apps. A Vita
+normally leaves apps three cores, and the fourth stays closed unless a plugin opens it.
 
 - v0.1.282 and older need that core. Without a plugin they run slower: Tekken Tag Tournament fell to 41-55 fps in our
   test, and overclocking does not help. The in-app update check does not run either, so install v0.1.286 or newer by
@@ -101,35 +100,37 @@ three cores, and the fourth stays closed unless a plugin opens it.
 
 The app sets 444 MHz by itself, so PSVshell or another overclock plugin is not needed.
 
-| Game | Sets (parent first) | Year | Status | FPS | Notes |
-|---|---|---|---|---|---|
-| Tekken Tag Tournament | `tektagt`, `tektagtc1a`, `tektagtub`, `tektagtuc1`, `tektagtjc1` | 1999 | Playable | 59.94 | |
-| Tekken 3 | `tekken3`, `tekken3a`, `tekken3b`, `tekken3c`, `tekken3d`, `tekken3ua`, `tekken3ud`, `tekken3ja`, `tekken3jd`, `tekken3je1` | 1997 | Playable | 59.94 | |
-| Soul Calibur | `soulclbr`, `soulclbrab`, `soulclbrac`, `soulclbrub`, `soulclbruc`, `soulclbrja2`, `soulclbrjb`, `soulclbrjc` | 1998 | Playable | 59.93 | |
-| Ehrgeiz | `ehrgeiz`, `ehrgeizua`, `ehrgeizja` | 1998 | Playable | 59.94 | |
-| Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable | 59.89 | |
-| Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable | 59.94 | |
-| Libero Grande | `lbgrande` | 1997 | Playable | 59.94 | the game draws 30 pictures a second |
-| Super World Stadium '98 | `sws98` | 1998 | Playable | 59.90 | |
-| Super World Stadium '99 | `sws99` | 1999 | Playable | 59.94 | |
-| Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable | 59.94 | |
-| Aqua Rush | `aquarush` | 1999 | Playable | 59.94 | |
-| Tenkomori Shooting | `tenkomor`, `tenkomorja1` | 1998 | Playable | 59.83 | vertical screen |
-| Paca Paca Passion | `pacapp` | 1998 | Partial | 59.85 | falling notes may be drawn twice |
-| Paca Paca Passion 2 | `pacapp2` | 1999 | Partial | 59.86 | as above |
-| Paca Paca Passion Special | `pacappsp` | 1999 | Partial | 59.94 | as above |
-| Derby Quiz My Dream Horse | `mdhorse` | 1998 | Playable | 59.94 | the game draws about 40 pictures a second |
-| Kaiun Quiz | `kaiunqz` | 1999 | Playable | 59.94 | the game draws about 35 pictures a second |
-| Point Blank 2 / Gunbarl | `ptblank2`, `gunbarl` | 1999 | Partial | 59.94 | gun on an analog stick or touch; may stop during play |
-| Ghoul Panic / Oh! Bakyuuun | `ghlpanic`, `ohbakyuun` | 1999 | Playable | 59.94 | gun on an analog stick or touch |
-| Golgo 13 | `golgo13` | 1999 | Partial | 59.94 | the board tests its ROMs for a while after power-on |
-| Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Partial | 59.94 | as above |
-| Techno Drive | `technodr` | 1998 | Playable | 59.94 | wheel on an analog stick |
-| Attack Pla Rail | `aplarail` | 1998 | Playable | 59.94 | lever on an analog stick; the game draws 40 pictures a second |
-| Kart Duel | `kartduel`, `kartduelja` | 2000 | Partial | | no link play |
-| Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | | bad dumps, also not working in MAME |
-| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Not working | | also not working in MAME |
-| Um Jammer Lammy NOW!, Quest for Fame, Truck Kyosokyoku | `ujlnow`, `questff`, `truckk` | 1999 | Not working | | CD-XA board, not emulated |
+| Game | Sets (parent first) | Year | Status | Notes |
+|---|---|---|---|---|
+| Tekken Tag Tournament | `tektagt`, `tektagtc1a`, `tektagtub`, `tektagtuc1`, `tektagtjc1` | 1999 | Playable |  |
+| Tekken 3 | `tekken3`, `tekken3a`, `tekken3b`, `tekken3c`, `tekken3d`, `tekken3ua`, `tekken3ud`, `tekken3ja`, `tekken3jd`, `tekken3je1` | 1997 | Playable |  |
+| Soul Calibur | `soulclbr`, `soulclbrab`, `soulclbrac`, `soulclbrub`, `soulclbruc`, `soulclbrja2`, `soulclbrjb`, `soulclbrjc` | 1998 | Playable |  |
+| Ehrgeiz | `ehrgeiz`, `ehrgeizua`, `ehrgeizja` | 1998 | Playable |  |
+| Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable |  |
+| Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable |  |
+| Libero Grande | `lbgrande` | 1997 | Playable | the game draws 30 pictures a second |
+| Super World Stadium '98 | `sws98` | 1998 | Boots | the test runs reach a match (first innings) |
+| Super World Stadium '99 | `sws99` | 1999 | Boots | as `sws98` |
+| Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable |  |
+| Aqua Rush | `aquarush` | 1999 | Playable |  |
+| Tenkomori Shooting | `tenkomor`, `tenkomorja1` | 1998 | Playable | vertical screen (the core sets the rotation) |
+| Paca Paca Passion | `pacapp` | 1998 | Playable | the Vita build drew falling notes twice; not checked here |
+| Paca Paca Passion 2 | `pacapp2` | 1999 | Playable |  |
+| Paca Paca Passion Special | `pacappsp` | 1999 | Playable |  |
+| Derby Quiz My Dream Horse | `mdhorse` | 1998 | Playable | the game draws about 40 pictures a second |
+| Kaiun Quiz | `kaiunqz` | 1999 | Playable | the game draws about 35 pictures a second |
+| Point Blank 2 / Gunbarl | `ptblank2`, `gunbarl` | 1999 | Playable | lightgun (RetroArch lightgun device, or the left stick) |
+| Ghoul Panic / Oh! Bakyuuun | `ghlpanic`, `ohbakyuun` | 1999 | Playable | lightgun |
+| Golgo 13 | `golgo13` | 1999 | Playable | lightgun; the board tests its ROMs for about 50 s after power-on |
+| Golgo 13 Kiseki no Dandou | `g13knd` | 2000 | Playable | as `golgo13` |
+| Techno Drive | `technodr` | 1998 | Playable | needs `namco_emio102.zip`; wheel on the left stick, R2 gas, L2 brake |
+| Attack Pla Rail | `aplarail` | 1998 | Playable | lever on the left stick |
+| Kart Duel | `kartduel`, `kartduelja` | 2000 | Playable | two cabinets race over UDP, on the LAN or through the Recalbox link-lobby (see section 7) |
+| Tekken Tag Tournament (Japan) | `tektagtja3`, `tektagtjb` | 1999 | Not working | bad dumps, also not working in MAME |
+| Super World Stadium 2000 / 2001 | `sws2000`, `sws2001` | 2000 | Boots | the test runs reach a match (first innings); not working in MAME |
+| Um Jammer Lammy NOW! | `ujlnow` | 1999 | Playable | CD-XA board: disc `ujlnow/ul1-a.chd` next to the zip, CD audio |
+| Truck Kyosokyoku | `truckk` | 2000 | Playable | disc `truckk/tkk2-a.chd`; 2 coins, then the horn (button 3, RetroPad B) starts a game; R2 gas, L2 brake |
+| Quest for Fame | `questff` | 1999 | Untested | CD-XA board; no dump here |
 
 ## 4. Download
 
@@ -300,6 +301,48 @@ cmake --build build-vita              # build-vita/eboot.bin
 cmake --build build-vita --target vpk # build-vita/resys12.vpk
 ```
 
+### libretro core (Linux, Raspberry Pi 5)
+
+```bash
+make -C libretro                          # native (x86_64: R3000A interpreter)
+make -C libretro CC=aarch64-linux-gnu-gcc # Raspberry Pi 5, 64-bit OS (ari64 recompiler); needs an aarch64 zlib,
+                                          # e.g. LDFLAGS=-L<dir with libz.so>
+retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
+```
+
+Headless regression runs (RetroArch null drivers, scripted input, picture hashes): `libretro/tests/headless.py`
+(`--update` records the expected hashes; romset dir in `RS12_ROMS`).
+
+RetroPad: Y X B A L R L2 R2 = buttons 1-8, Start, Select = coin, L3 = test, R3 = service. With no stick to click
+(arcade panel, wheel), the core options `resys12_service_mode` (`start_hold`) and `resys12_service1` (`start_b_hold`)
+move them onto Start held alone for 5 s (Test, the operator menu) and Start + B held together for 5 s (Service), as
+the blueflash core does; the press fires once when the 5 s are reached, and Start and B still reach the game
+meanwhile. The EEPROM is the core's save RAM (`.srm`); save states go through RetroArch.
+
+CD-XA sets (`truckk`, `ujlnow`, `questff`) read their disc as MAME does: `<romdir>/<set>/<disc>.chd` next to the zip.
+Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the same folder. Gun games read the RetroArch
+lightgun device. Kart Duel links two cabinets: core option `resys12_link` sets the UDP port, `resys12_link_id` the PCB ID (1 or 2,
+one per cabinet; restart the content after changing it).
+
+Over the internet, the cabinets meet through the Recalbox [link-lobby](https://gitlab.com/recalbox/packages/recalbox-cores/link-lobby),
+as the System 23 core does: with `resys12_link` on, a `sys12_comm.cfg` next to the saves (`lobby = host[:port]`,
+`room = name`, `nick = name`; or `RS12_LOBBY` / `RS12_ROOM` / `RS12_NICK`) sends the cabinet to that lobby. It holds
+its boot until the lobby pairs it (60 s at most, `RS12_LINK_HOLD`), then boots with the PCB ID the lobby gives (1 for
+the master, 2 for the other), so `resys12_link_id` is not needed. The cabinet identity is kept in `sys12_guid.txt`.
+
+#### System 11 (libretro, `system11` branch)
+
+The same core runs Namco System 11 sets (MAME names, picked from the set name): main board with shared RAM, KEYCUS
+protection, EEPROM and ROM banks, plus the C76 sound / I/O MCU (an M37710 interpreter in `src/m37710`) driving the C352.
+The C76 BIOS `namcoc76.zip` (`c76.bin`) must sit next to the sets. Headless runs read System 11 sets from `RS11_ROMS`
+(default `~/system11`).
+
+| Set | Status |
+|---|---|
+| `tekken2`, `souledgea` | Playable: attract, coin, character select and fights, with sound (headless tests) |
+| `tekken` | Boots; textures and HUD wrong (COH-100 board, CXD8538Q GPU) |
+| other sets in `src/romload/s11_games.h` | Untested; the gun sets (`ptblank2a`, `gunbarla`...) are not in the table |
+
 ## 8. Project Layout
 
 ```
@@ -310,6 +353,7 @@ src/sound/     C352
 src/romload/   MAME set tables, zip reader, ROM cache
 src/sys/       Vita heap and JIT memory
 vita/          PS Vita port: frontend, video output (vitaGL), platform code, LiveArea assets
+libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5)
 ```
 
 ## 9. Accuracy and Testing

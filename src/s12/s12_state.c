@@ -2,6 +2,8 @@
 // (RAM, hw registers, CPU registers, GPU registers + VRAM, root counters, MDEC), then the System 12 parts.
 // GPL-2.0-or-later.
 #include "s12_state.h"
+#include "s12_link.h"
+#include "s12_cdxa.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +18,7 @@
 #include "gpu.h"
 #include "s12.h"
 #include "s12_sound.h"
+#include "s11.h"
 
 #define STATE_MAGIC "RS12STA1"
 #define VRAM_BYTES (1024 * 1024 * 2)
@@ -148,22 +151,44 @@ uint8_t *s12_state_save(size_t *size)
 		free(tmp);
 	} else
 		ms.failed = 1;
-	n = s12_sub_state_size();
+	// the sub CPU side: the H8 and the C352, or System 11's board and C76
+	n = s12.s11 ? s11_state_size() : s12_sub_state_size();
 	tmp = (uint8_t *)malloc(n);
 	if (tmp) {
-		s12_sub_state_save(tmp);
+		(s12.s11 ? s11_state_save : s12_sub_state_save)(tmp);
 		put_block(&ms, tmp, n);
 		free(tmp);
 	} else
 		ms.failed = 1;
-	n = s12_sound_state_size();
-	tmp = (uint8_t *)malloc(n);
+	n = s12.s11 ? 0 : s12_sound_state_size();
+	tmp = n ? (uint8_t *)malloc(n) : NULL;
 	if (tmp) {
 		s12_sound_state_save(tmp);
 		put_block(&ms, tmp, n);
 		free(tmp);
-	} else
+	} else if (n)
 		ms.failed = 1;
+	if (s12.game && s12.game->state == S12_S_KARTDUEL) { // the network board's CPU (other sets: no block)
+		n = s12_link_state_size();
+		tmp = (uint8_t *)malloc(n);
+		if (tmp) {
+			s12_link_state_save(tmp);
+			put_block(&ms, tmp, n);
+			free(tmp);
+		} else
+			ms.failed = 1;
+	}
+
+	if (s12.cdxa) { // the CD-XA board and its drive (other sets: no block)
+		n = s12_cdxa_state_size();
+		tmp = (uint8_t *)malloc(n);
+		if (tmp) {
+			s12_cdxa_state_save(tmp);
+			put_block(&ms, tmp, n);
+			free(tmp);
+		} else
+			ms.failed = 1;
+	}
 
 	if (ms.failed) {
 		free(ms.buf);
@@ -250,10 +275,16 @@ int s12_state_load(const uint8_t *buf, size_t size)
 	mdecFreeze(&ms, 0);
 
 	int r = get_block(&ms, s12_board_state_load, s12_board_state_size());
-	if (!r)
+	if (!r && s12.s11)
+		r = get_block(&ms, s11_state_load, s11_state_size());
+	if (!r && !s12.s11)
 		r = get_block(&ms, s12_sub_state_load, s12_sub_state_size());
-	if (!r)
+	if (!r && !s12.s11)
 		r = get_block(&ms, s12_sound_state_load, s12_sound_state_size());
+	if (!r && s12.game->state == S12_S_KARTDUEL)
+		r = get_block(&ms, s12_link_state_load, s12_link_state_size());
+	if (!r && s12.cdxa)
+		r = get_block(&ms, s12_cdxa_state_load, s12_cdxa_state_size());
 
 	events_restore();
 	psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD_STATE, NULL);
