@@ -313,6 +313,19 @@ as the System 23 core does: with `resys12_link` on, a `sys12_comm.cfg` next to t
 its boot until the lobby pairs it (60 s at most, `RS12_LINK_HOLD`), then boots with the PCB ID the lobby gives (1 for
 the master, 2 for the other), so `resys12_link_id` is not needed. The cabinet identity is kept in `sys12_guid.txt`.
 
+#### System 11 (libretro, `system11` branch)
+
+The same core runs Namco System 11 sets (MAME names, picked from the set name): main board with shared RAM, KEYCUS
+protection, EEPROM and ROM banks, plus the C76 sound / I/O MCU (an M37710 interpreter in `src/m37710`) driving the C352.
+The C76 BIOS `namcoc76.zip` (`c76.bin`) must sit next to the sets. Headless runs read System 11 sets from `RS11_ROMS`
+(default `~/system11`).
+
+| Set | Status |
+|---|---|
+| `tekken2`, `souledgea` | Playable: attract, coin, character select and fights, with sound (headless tests) |
+| `tekken` | Boots; textures and HUD wrong (COH-100 board, CXD8538Q GPU) |
+| other sets in `src/romload/s11_games.h` | Untested; the gun sets (`ptblank2a`, `gunbarla`...) are not in the table |
+
 ## 8. Project Layout
 
 ```
