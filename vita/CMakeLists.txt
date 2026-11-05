@@ -61,7 +61,8 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/s12/s12_cdmix.c
   ${RS12_ROOT}/src/s12/s12_atapi.c
   ${RS12_ROOT}/src/s11/s11.c
-  ${RS12_ROOT}/src/s11/s11_c76_stub.c
+  ${RS12_ROOT}/src/m37710/m37710.c
+  ${RS12_ROOT}/src/s11/s11_c76.c
   ${RS12_ROOT}/src/sh2/sh2.c
   ${RS12_ROOT}/src/h8/h8.c
   ${RS12_ROOT}/src/h8/h8_periph.c

@@ -19,7 +19,7 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
   $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c $(ROOT)/src/s12/s12_link.c \
   $(ROOT)/src/s12/s12_cdxa.c $(ROOT)/src/s12/s12_cdmix.c $(ROOT)/src/s12/s12_atapi.c $(ROOT)/src/sh2/sh2.c \
   $(ROOT)/src/s11/s11.c \
-  $(ROOT)/src/s11/s11_c76_stub.c \
+  $(ROOT)/src/m37710/m37710.c $(ROOT)/src/s11/s11_c76.c \
   $(ROOT)/deps/libchdr/unity.c \
   $(ROOT)/src/h8/h8.c $(ROOT)/src/h8/h8_periph.c $(ROOT)/src/sound/c352.c \
   $(ROOT)/src/romload/s12_rom.c $(ROOT)/src/romload/rs12_zip.c $(ROOT)/src/romload/junzip.c \
