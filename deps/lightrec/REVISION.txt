@@ -1,0 +1,3 @@
+lightrec (https://github.com/pcercuei/lightrec) at 3be07f5860e4edf047a12f2c107af2459786ffb3, the deps/lightrec submodule of
+pcsx_rearmed c8816799b50388e61cfe237fe2cdbb7d8175f20a. Vendored as plain files (threaded compiler sources left out).
+ReSys12 changes carry "ReSys12:" comments.

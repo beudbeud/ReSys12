@@ -47,9 +47,22 @@ else ifeq ($(ARCH),aarch64)
   GPU_IF_FLAGS += -DSIMD_BUILD
   CFLAGS += -DSIMD_BUILD
 else
-  # no ari64 backend: R3000A interpreter
-  CFLAGS += -DDRC_DISABLE
+  # no ari64 backend: lightrec recompiler (deps/lightrec + GNU lightning, x86); make LIGHTREC=0 for the R3000A interpreter
+  LIGHTREC ?= 1
   GPU_IF_FLAGS :=
+  ifeq ($(LIGHTREC),1)
+    LR := $(ROOT)/deps/lightrec
+    LN := $(ROOT)/deps/lightning
+    SRC += $(PSX)/libpcsxcore/lightrec/plugin.c $(LR)/blockcache.c $(LR)/constprop.c $(LR)/disassembler.c \
+      $(LR)/emitter.c $(LR)/interpreter.c $(LR)/lightrec.c $(LR)/memmanager.c $(LR)/optimizer.c $(LR)/regcache.c \
+      $(LR)/tlsf/tlsf.c $(LN)/lib/lightning.c $(LN)/lib/jit_disasm.c $(LN)/lib/jit_memory.c $(LN)/lib/jit_names.c \
+      $(LN)/lib/jit_note.c $(LN)/lib/jit_print.c $(LN)/lib/jit_size.c
+    CFLAGS += -DLIGHTREC -DLIGHTREC_STATIC -DLIGHTREC_CUSTOM_MAP=0 -DLIGHTREC_CODE_INV=0 \
+      -DLIGHTREC_ENABLE_THREADED_COMPILER=0 -DLIGHTREC_ENABLE_DISASSEMBLER=0 -DLIGHTREC_NO_DEBUG=1 \
+      -I$(LN)/include -I$(LR) -I$(PSX)/libpcsxcore/lightrec
+  else
+    CFLAGS += -DDRC_DISABLE
+  endif
 endif
 
 # (object paths keep the tree: ../src/x.c -> obj/<arch>/src/x.o)
@@ -66,6 +79,9 @@ obj/$(ARCH)/$(TARGET): $(OBJ)
 
 obj/$(ARCH)/src/psx/plugins/gpu_neon/psx_gpu_if.o: CFLAGS += $(GPU_IF_FLAGS)
 obj/$(ARCH)/src/psx/plugins/gpu_neon/psx_gpu/psx_gpu_simd.o: CFLAGS += $(GPU_IF_FLAGS)
+
+obj/$(ARCH)/deps/lightning/%.o: CFLAGS += -DHAVE_MMAP=0 -w
+obj/$(ARCH)/deps/lightrec/%.o: CFLAGS += -w -DLOG_LEVEL=1
 
 CHDR := $(ROOT)/deps/libchdr
 obj/$(ARCH)/deps/libchdr/unity.o: CFLAGS += -DZ7_ST -I$(CHDR)/deps/lzma-25.01/include -I$(CHDR)/deps/zstd-1.5.7 -I$(CHDR)/deps/miniz-3.1.1 -w

@@ -399,14 +399,18 @@ bool retro_load_game(const struct retro_game_info *game)
 	}
 
 	memset(&Config, 0, sizeof(Config));
-#if defined(__arm__) || defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__) || defined(LIGHTREC)
 	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
 #else
 	Config.Cpu = CPU_INTERPRETER;
 #endif
 	// CD-XA sets keep the interpreter's rate: at 120 the library VSync timeout loop (32768 x 14 instructions) is shorter
-	// than a frame, so full-frame waits time out and the boot handshake with the SH2 (768 VSyncs) expires too soon
+	// than a frame, so full-frame waits time out and the boot handshake with the SH2 (768 VSyncs) expires too soon.
+	// lightrec (x86_64) keeps it too: it times as the interpreter (the test pictures)
 	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC && !s12.cdxa ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
+#ifdef LIGHTREC
+	Config.cycle_multiplier = S12_CYCLE_MULTIPLIER;
+#endif
 	if (getenv("RS12_CYCLE_MULT")) // comparisons
 		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
 
@@ -421,14 +425,14 @@ bool retro_load_game(const struct retro_game_info *game)
 		extern int h8_blk_enable;
 		h8_blk_enable = getenv("RS12_H8BLK") ? atoi(getenv("RS12_H8BLK")) : 1;
 	}
-#if !defined(DRC_DISABLE) && defined(RS12_HARNESS)
+#if !defined(DRC_DISABLE) && !defined(LIGHTREC) && defined(RS12_HARNESS)
 	{ // comparisons: ReSys12 recompiler switches, as the Vita's data files (ndrcalign, nokeepsame)
 		extern int rs12_ndrc_align, rs12_ndrc_keep_same;
 		if (getenv("RS12_NDRC_ALIGN")) rs12_ndrc_align = atoi(getenv("RS12_NDRC_ALIGN"));
 		if (getenv("RS12_NOKEEPSAME")) rs12_ndrc_keep_same = 0;
 	}
 #endif
-#ifndef DRC_DISABLE
+#if !defined(DRC_DISABLE) && !defined(LIGHTREC)
 	{ // comparisons: recompiler option bits (NDHACK_*), as the Vita's ndhacks file
 		extern struct ndrc_globals ndrc_g;
 		if (getenv("RS12_NDHACKS"))
@@ -447,7 +451,12 @@ bool retro_load_game(const struct retro_game_info *game)
 	psxReset();
 	s_snd_prev = NULL;
 	s_loaded = 1;
-	fprintf(stderr, "ReSys12: %s loaded (%s), %s\n", name, msg, Config.Cpu == CPU_DYNAREC ? "ari64 dynarec" : "interpreter");
+	fprintf(stderr, "ReSys12: %s loaded (%s), %s\n", name, msg, Config.Cpu != CPU_DYNAREC ? "interpreter" :
+#ifdef LIGHTREC
+		"lightrec dynarec");
+#else
+		"ari64 dynarec");
+#endif
 	return true;
 }
 
