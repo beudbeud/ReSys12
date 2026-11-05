@@ -112,9 +112,8 @@ x86_64 and on the Pi 5.
 
 | Set | Status |
 |---|---|
-| `tekken2`, `souledgea`, `dunkmnia`, `primglex`, `starswep`, `xevi3dg`, `pocketrc`, `danceyes`, `myangel3` | Playable |
+| `tekken`, `tekken2`, `souledgea`, `dunkmnia`, `primglex`, `starswep`, `xevi3dg`, `pocketrc`, `danceyes`, `myangel3` | Playable |
 | `ptblank2a`, `ptblank2b`, `ptblank2c`, `ptblank2ua`, `gunbarla` | Playable in the headless runs (gun at the screen centre); gun as on System 12 (RetroArch lightgun, or the left stick) |
-| `tekken` | Boots; textures and HUD wrong (COH-100 board, CXD8538Q GPU) |
 | `fambowl` | Not working: waits on "put the ball back" (the bowling lane's sensors are not emulated, nor in MAME) |
 | other clones in `src/romload/s11_games.h` | Untested |
 

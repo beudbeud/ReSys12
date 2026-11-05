@@ -136,6 +136,28 @@ static void set_texture(psx_gpu_struct *psx_gpu, u32 texture_settings)
       psx_gpu->last_8bpp_texture_page = new_texture_page;
     }
 
+    // ReSys12: a cache built for the other layout (interleaved or not) is rebuilt in full
+    psx_gpu->tex_ti = (texture_settings >> 14) & 1;
+    if(texture_mode == TEXTURE_MODE_4BPP)
+    {
+      if(((psx_gpu->ti_built4 >> new_texture_page) & 1) != psx_gpu->tex_ti)
+      {
+        psx_gpu->dirty_textures_4bpp_mask |= 1ull << new_texture_page;
+        psx_gpu->dirty4_rows[new_texture_page] = 0;
+      }
+    }
+    else if(texture_mode == TEXTURE_MODE_8BPP)
+    {
+      const u64 m = psx_gpu->current_texture_mask;
+      const u64 have = psx_gpu->ti_built8[new_texture_page & 1] & m;
+      if(psx_gpu->tex_ti ? have != m : have != 0)
+      {
+        psx_gpu->dirty_textures_8bpp_mask |= m;
+        psx_gpu->dirty8_rows[new_texture_page & 1][new_texture_page] = 0;
+        psx_gpu->dirty8_rows[new_texture_page & 1][((new_texture_page + 1) & 0xF) | (new_texture_page & 0x30)] = 0;
+      }
+    }
+
     psx_gpu->current_texture_page = new_texture_page;
     psx_gpu->texture_settings = texture_settings;
 

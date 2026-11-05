@@ -273,6 +273,9 @@ typedef struct
   u32 split_fast_clut;
   u32 split_fast_tw;
   s32 split_fast_wr[4];
+  u8 tex_ti;                         // ReSys12: the current texture is interleaved (COH-100 GPU, tpage bit 14 from gpulib)
+  u64 ti_built4;                     // 4bpp cache pages holding interleaved texels
+  u64 ti_built8[2];                  // 8bpp cache slices holding interleaved texels, per layout (page & 1)
   // Instance whose texture caches are used. The second split instance shares
   // the first one's: cache contents are a function of VRAM only, and both
   // instances only ever store the same values (an instance may refresh a page

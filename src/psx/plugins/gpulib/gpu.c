@@ -55,6 +55,8 @@ static void sync_renderer_ecmds(struct psx_gpu *gpu)
     renderer_sync_ecmds(gpu->ex_regs);
 }
 
+static uint32_t t1_stat; // ReSys12: type 1 GPU status bits 0-12 (t1_tpage)
+
 static void sync_ecmds_status_bits(struct psx_gpu *gpu)
 {
   // ReSys12: System 12 GPU (MAME psxgpu type 2) reports tpage bit 11
@@ -63,6 +65,8 @@ static void sync_ecmds_status_bits(struct psx_gpu *gpu)
   gpu->status |= gpu->ex_regs[1] & 0x7ff;
   gpu->status |= (gpu->ex_regs[6] & 3) << 11;
   gpu->status |= (gpu->ex_regs[1] & 0x800) << 4;
+  if (rs12_gpu_type1) // MAME type 1: the raw tpage bits 0-12
+    gpu->status = (gpu->status & ~(0x1fff | 0x8000)) | t1_stat;
 }
 
 static noinline void do_cmd_reset(struct psx_gpu *gpu)
@@ -290,7 +294,7 @@ static noinline void get_gpu_info(struct psx_gpu *gpu, uint32_t data)
       gpu->gp0 = gpu->ex_regs[5] & 0x3fffff;
       break;
     case 0x07:
-      gpu->gp0 = 2;
+      gpu->gp0 = rs12_gpu_type1 ? 1 : 2; // ReSys12: MAME n_gpuinfo = type
       break;
     default:
       // gpu->gp0 unchanged
@@ -317,6 +321,54 @@ static noinline void get_gpu_info(struct psx_gpu *gpu, uint32_t data)
 // for scanouts that run past line 1023
 #define VRAM_SIZE ((1024 * 1024 * 2) + (1024 * 512 * 2) + max(VRAM_ALIGN, 4096))
 int rs12_vram_ymask = 1023; // ReSys12 (gpu.h)
+int rs12_gpu_type1; // ReSys12 (gpu.h)
+
+// ReSys12: COH-100 GPU (CXD8538Q, MAME psx.cpp type 1) words -> the type 2 layout gpulib and the renderer use.
+// tpage: tx 0-3, ty 5-6 (256-line pages), abr 7-8, tp 9-10, ti 13 (interleaved texels, psx_gpu.c rs12_ti_build*)
+// -> tx 0-3, ty 4 and 11, abr 5-6, tp 7-8, ti 14 (12-13 are the rectangle flips there). Draw area / display start Y at bit 12 -> 10,
+// draw offset Y at bit 12 -> 11. The status shows the raw tpage bits 0-12 (t1_stat): libgpu tells the GPUs apart by them
+
+static uint32_t t1_tpage(uint32_t t)
+{
+  t1_stat = t & 0x1fff;
+  return (t & 0xf) | ((t >> 1) & 0x10) | ((t << 5) & 0x800) | ((t >> 2) & 0x1e0) | ((t << 1) & 0x4000);
+}
+
+static uint32_t t1_area(uint32_t w) { return (w & 0xff0003ff) | (((w >> 12) & 0x3ff) << 10); }
+
+// rewrites the type 1 commands of data[pos..count) in place (a copy of the GP0 words) up to and with the next VRAM
+// transfer command, whose data words follow; returns where it stopped (an incomplete command stays as it is)
+static int t1_translate(uint32_t *data, int pos, int count)
+{
+  while (pos < count) {
+    const uint32_t w = LE32TOH(data[pos]), cmd = w >> 24;
+    int len = 1 + cmd_lengths[cmd];
+    if ((cmd >= 0x48 && cmd <= 0x4f) || (cmd >= 0x58 && cmd <= 0x5f)) { // polyline: up to the 0x5xxx5xxx word
+      int stride = cmd >= 0x58 ? 2 : 1, i = pos + 3 + (stride - 1);
+      while (i < count && (LE32TOH(data[i]) & 0xf000f000) != 0x50005000)
+        i += stride;
+      if (i >= count)
+        return pos;
+      len = i + 1 - pos;
+    }
+    if (pos + len > count)
+      return pos;
+    switch (cmd) {
+    case 0x24 ... 0x27: case 0x2c ... 0x2f: case 0x34 ... 0x37: case 0x3c ... 0x3f: {
+      uint32_t *t = &data[pos + 4 + ((cmd >> 4) & 1)], v = LE32TOH(*t);
+      *t = HTOLE32((v & 0xffff) | (t1_tpage(v >> 16) << 16));
+      break;
+    }
+    case 0xe1: data[pos] = HTOLE32((w & 0xff000000) | t1_tpage(w)); break;
+    case 0xe3: case 0xe4: data[pos] = HTOLE32(t1_area(w)); break;
+    case 0xe5: data[pos] = HTOLE32((w & 0xff0007ff) | (((w >> 12) & 0x7ff) << 11)); break;
+    }
+    pos += len;
+    if ((cmd & 0xe0) == 0xa0 || (cmd & 0xe0) == 0xc0)
+      return pos;
+  }
+  return pos;
+}
 
 // vram ptr received from mmap/malloc/alloc (will deallocate using this)
 static uint16_t *vram_ptr_orig = NULL;
@@ -390,6 +442,8 @@ void GPUwriteStatus(uint32_t data)
 {
   if (unlikely(gr_on))
     gr_put(GR_STATUS, &data, 1);
+  if (rs12_gpu_type1 && (data >> 24) == 0x05) // ReSys12: type 1 display start Y at bit 12
+    data = t1_area(data);
   uint32_t cmd = data >> 24;
   uint32_t fb_dirty = 1, frame;
   int src_x, src_y, changed;
@@ -927,6 +981,19 @@ static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count
     }
   }
 
+  // ReSys12: type 1 GPU - the commands are rewritten on a copy (DMA chains point into the game's RAM, and an
+  // incomplete command goes back to the caller as it came), command by command up to each VRAM transfer
+  static uint32_t *t1_buf;
+  static int t1_cap;
+  int t1_end = 0;
+  if (rs12_gpu_type1) {
+    if (count > t1_cap) {
+      t1_cap = count + 1024;
+      t1_buf = realloc(t1_buf, t1_cap * sizeof(*t1_buf));
+    }
+    data = memcpy(t1_buf, data, count * sizeof(*data));
+  }
+
   // process buffer
   for (pos = 0; pos < count; )
   {
@@ -936,6 +1003,8 @@ static noinline int do_cmd_buffer(struct psx_gpu *gpu, uint32_t *data, int count
       if (pos == count)
         break;
     }
+    if (rs12_gpu_type1 && pos >= t1_end)
+      t1_end = t1_translate(data, pos, count);
 
     cmd = LE32TOH(data[pos]) >> 24;
     switch (cmd & 0xe0) {

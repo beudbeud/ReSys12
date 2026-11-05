@@ -407,10 +407,11 @@ bool retro_load_game(const struct retro_game_info *game)
 	}
 
 	// gpulib VRAM lines. System 11 as MAME: 2MB GPU RAM (1024 lines) on both CPU boards; tekken2 (COH-110, CXD8561Q)
-	// draws right only so. ponytail: tekken (COH-100, CXD8538Q) is wrong with 512 and 1024 lines alike (its tpage
-	// decode differs); RS11_VRAM512 keeps the 512-line PS1 wrapping for comparisons
-	extern int rs12_vram_ymask;
+	// draws right only so. tekken / tekken2o sets (COH-100, CXD8538Q = MAME psxgpu type 1) have their own tpage and
+	// draw area layout, gpulib rewrites it (rs12_gpu_type1); RS11_VRAM512 keeps the 512-line PS1 wrapping for comparisons
+	extern int rs12_vram_ymask, rs12_gpu_type1;
 	rs12_vram_ymask = s12.s11 && getenv("RS11_VRAM512") ? 511 : 1023;
+	rs12_gpu_type1 = s12.s11 && (s12.game->flags & S12_G_GPU1);
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__) || defined(LIGHTREC)
 	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;

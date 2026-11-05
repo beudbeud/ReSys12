@@ -178,7 +178,10 @@ void vout_set_config(const struct rearmed_cbs *config);
 // ReSys12: VRAM lines - 1: 1023 on System 12 (2MB VRAM, the 10-bit Y masks), 511 on System 11 (stock PS1 GPU,
 // 9-bit Y, tpage bit 11 ignored). Set before GPU_open
 extern int rs12_vram_ymask;
-#define RS12_TPAGE_MASK (rs12_vram_ymask > 511 ? 0x9ff : 0x1ff)
+// ReSys12: COH-100 GPU (CXD8538Q, MAME psxgpu type 1): gpulib rewrites its words to the type 2 layout, the tpage
+// interleave bit (13) going to bit 14
+extern int rs12_gpu_type1;
+#define RS12_TPAGE_MASK ((rs12_vram_ymask > 511 ? 0x9ff : 0x1ff) | (rs12_gpu_type1 << 14))
 
 int  do_vram_copy_pre(struct psx_gpu *gpu, const uint32_t *params, int *cpu_cycles);
 int  do_vram_copy(uint16_t *vram, const uint32_t *ex_regs, const uint32_t *params);

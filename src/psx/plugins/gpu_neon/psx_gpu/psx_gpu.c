@@ -250,11 +250,50 @@ static void mark_8bpp_rows(psx_gpu_struct *psx_gpu, u64 mask, u32 y1, u32 y2)
 
 // ReSys12: the 4bpp cache of the current page for the tile rows marked since its last conversion. Called by
 // update_texture_4bpp_cache (C, and the NEON asm before its own full conversion); 0 = convert the whole page
+// ReSys12: COH-100 GPU interleaved textures (MAME psx.cpp TEXTUREINTERLEAVED4BIT / 8BIT): the current page's cache
+// (texel u, v at tile v / 16, u / 16, row v % 16, column u % 16, as the linear builders) from the interleaved VRAM
+static void rs12_ti_build(psx_gpu_struct *psx_gpu, int bpp8)
+{
+  const u32 page = psx_gpu->current_texture_page;
+  const u32 px = (page & 0xF) * 64, py = (page >> 4) * 256;
+  u8 *t = psx_gpu->texture_page_base;
+  u32 u, v;
+
+  for(v = 0; v < 256; v++)
+    for(u = 0; u < 256; u++)
+    {
+      u32 xi, yi, texel;
+      if(bpp8)
+      {
+        xi = ((u >> 1) & 7) + ((u << 2) & 0x40) + ((v << 3) & 0x38);
+        yi = (v & ~7) + ((u >> 5) & 7);
+        texel = (psx_gpu->vram_ptr[(py + yi) * 1024 + ((px + xi) & 1023)] >> ((u & 1) * 8)) & 0xFF;
+      }
+      else
+      {
+        xi = ((u >> 2) & 3) + ((v << 2) & 0x3c);
+        yi = (v & ~0xF) + ((u >> 4) & 0xF);
+        texel = (psx_gpu->vram_ptr[(py + yi) * 1024 + px + xi] >> ((u & 3) * 4)) & 0xF;
+      }
+      t[(v >> 4) * 4096 + (u >> 4) * 256 + (v & 15) * 16 + (u & 15)] = texel;
+    }
+}
+
 u32 rs12_update_texture_4bpp_rows(psx_gpu_struct *psx_gpu)
 {
   const u32 page = psx_gpu->current_texture_page;
   const u32 rows = psx_gpu->dirty4_rows[page];
   u32 tile_y, tile_x, sub_y, k;
+
+  if(psx_gpu->tex_ti) // ReSys12: interleaved, always in full
+  {
+    rs12_ti_build(psx_gpu, 0);
+    psx_gpu->dirty4_rows[page] = 0;
+    psx_gpu->dirty_textures_4bpp_mask &= ~(psx_gpu->current_texture_mask);
+    psx_gpu->ti_built4 |= 1ull << page;
+    return 1;
+  }
+  psx_gpu->ti_built4 &= ~(1ull << page);
 
   psx_gpu->dirty4_rows[page] = 0;
   if(rows == 0 || rows == 0xFFFF)
@@ -327,7 +366,7 @@ static void update_texture_cache_region_(psx_gpu_struct *psx_gpu,
   psx_gpu->dirty_textures_8bpp_mask |= mask;
   psx_gpu->dirty_textures_8bpp_alternate_mask |= mask;
 
-  if ((psx_gpu->dirty_textures_4bpp_mask & mask) == 0 &&
+  if ((psx_gpu->dirty_textures_4bpp_mask & mask) == 0 && !(psx_gpu->ti_built4 & mask) && // ReSys12
       (x1 & 3) == 0 && (y1 & 15) == 0 && x2 - x1 < 4 && y2 - y1 < 16)
   {
     texture_page = ((x1 / 64) & 15) + (y1 / 256) * 16;
@@ -550,6 +589,7 @@ static void update_texture_8bpp_cache_rows(psx_gpu_struct *psx_gpu,
 static void update_texture_8bpp_cache_page(psx_gpu_struct *psx_gpu, u32 page)
 {
   u16 *rows_p = &psx_gpu->dirty8_rows[psx_gpu->current_texture_page & 1][page];
+  psx_gpu->ti_built8[psx_gpu->current_texture_page & 1] &= ~(1ull << page);
   const u32 rows = *rows_p;
   *rows_p = 0;
   if(rows == 0 || rows == 0xFFFF)
@@ -568,6 +608,19 @@ void update_texture_8bpp_cache(psx_gpu_struct *psx_gpu)
   const u32 rs12_saved = *rs12_act;
   *rs12_act = (rs12_saved & 0xff) | (6 << 12);
 #endif
+  if(psx_gpu->tex_ti) // ReSys12: interleaved, both slices at once
+  {
+    const u32 par = current_texture_page & 1;
+    rs12_ti_build(psx_gpu, 1);
+    psx_gpu->dirty_textures_8bpp_mask &= ~(psx_gpu->current_texture_mask);
+    psx_gpu->ti_built8[par] |= psx_gpu->current_texture_mask;
+    psx_gpu->dirty8_rows[par][current_texture_page] = 0;
+    psx_gpu->dirty8_rows[par][((current_texture_page + 1) & 0xF) | (current_texture_page & 0x30)] = 0;
+#ifdef RS12_SUB_PROFILE
+    *rs12_act = rs12_saved;
+#endif
+    return;
+  }
   // ReSys12: 64-bit page masks, page row in bits 4-5
   u64 update_textures =
    psx_gpu->dirty_textures_8bpp_mask & psx_gpu->current_texture_mask;

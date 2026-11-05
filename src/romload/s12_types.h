@@ -13,7 +13,7 @@ enum { S12_M_COH700, S12_M_COH700B, S12_M_COH716, S12_M_APLARAIL, S12_M_TECHNODR
 // driver state class (MAME), decides banking and protection
 enum { S12_S_BASE, S12_S_ALTBANK, S12_S_CDXA, S12_S_TEKTAGT, S12_S_PTBLANK2, S12_S_TECHNODR, S12_S_GOLGO13,
        S12_S_TRUCKK, S12_S_KARTDUEL, S12_S_S11_ROM8, S12_S_S11_ROM8_64, S12_S_S11_NOBANK /* System 11 maps */ };
-enum { S12_G_NOT_WORKING = 1 };
+enum { S12_G_NOT_WORKING = 1, S12_G_GPU1 = 2 /* System 11 COH-100: CXD8538Q GPU (MAME psxgpu type 1) */ };
 
 typedef struct {
 	uint8_t region, load, flags;
