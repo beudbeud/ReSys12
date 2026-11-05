@@ -73,6 +73,9 @@ OBJ := $(addprefix obj/$(ARCH)/,$(patsubst %.S,%.o,$(patsubst %.c,%.o,$(subst ..
 # kartduel link CPU: src/h8 built a second time with its symbols renamed (src/h8/h8_link_names.h)
 OBJ += obj/$(ARCH)/link/h8.o obj/$(ARCH)/link/h8_periph.o
 
+# header dependencies (.d next to each object, read at the end: the default goal stays all)
+CFLAGS += -MMD -MP
+
 # (linked per arch, then copied: switching CC relinks)
 all: obj/$(ARCH)/$(TARGET)
 	cp $< $(TARGET)
@@ -108,3 +111,5 @@ clean:
 	rm -rf obj $(TARGET)
 
 .PHONY: all clean
+
+-include $(OBJ:.o=.d)
