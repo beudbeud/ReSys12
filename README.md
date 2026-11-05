@@ -5,8 +5,8 @@
 <h1 align="center">ReSys12</h1>
 
 <p align="center">
-  <b>Namco System 12 arcade emulator for PlayStation Vita</b><br>
-  pcsx_rearmed based &middot; R3000A dynarec for ARMv7 &middot; NEON GPU rasterizer &middot; C352 sound<br>
+  <b>Namco System 12 arcade emulator for PlayStation Vita, and a libretro core for System 11 and System 12</b><br>
+  pcsx_rearmed based &middot; R3000A dynarecs (ARMv7, aarch64, x86_64) &middot; NEON GPU rasterizer &middot; C352 sound<br>
   <a href="https://www.patreon.com/Reyanon">Support on Patreon</a> or <a href="https://ko-fi.com/reyanon">Ko-Fi</a>
 </p>
 
@@ -41,6 +41,10 @@ Tournament at a locked 60 fps on a PS Vita at 444 MHz, without frame skipping. E
 
 Board accuracy is kept where the player can see or hear it. Timing details that do not change what is on
 screen are simplified when that buys speed.
+
+The same emulation also builds as a [libretro core](#libretro-core-linux-raspberry-pi-5) for Linux (x86_64, Raspberry
+Pi 5), which also runs the earlier Namco System 11 board (Tekken 2, Soul Edge, Xevious 3D/G, ...; see
+[System 11](#system-11-libretro)). Recalbox ships it as the `namcos12` and `namcos11` systems (core `resys12`).
 
 ## 2. Highlights
 
@@ -184,7 +188,8 @@ starts load the cache directly.
   Files inside the zip are matched by CRC32, so their names do not matter.
 - Clone sets (for example `tektagtub`) read missing files from the parent zip (`tektagt.zip`), so keep the
   parent in the same folder, or use non-merged sets.
-- No BIOS zip is needed. CHD images are not used.
+- No BIOS zip is needed. The CD-XA sets (`ujlnow`, `truckk`, `questff`) also need their disc as MAME lays it out:
+  `ux0:data/resys12/roms/<set>/<disc>.chd` next to the zip.
 - The *Playable* list shows only sets whose ROM zip was found; press SELECT in the list to show all supported sets.
 
 ### Optional files
@@ -353,14 +358,19 @@ The gun sets are clones of the System 12 `ptblank2`: they read the files they sh
 ## 8. Project Layout
 
 ```
-src/psx/       pcsx_rearmed subset: R3000A, ari64 recompiler, GTE, gpulib, gpu_neon, plus the System 12 shim
-src/s12/       System 12 board: memory map, KC0xx protection, ROM DMA, EEPROM, RTC, JVS I/O, save states
+src/psx/       pcsx_rearmed subset: R3000A, ari64 recompiler, lightrec glue, GTE, gpulib, gpu_neon, System 12 shim
+src/s12/       System 12 board: memory map, KC0xx protection, ROM DMA, EEPROM, RTC, JVS I/O, CD-XA board, save states
+src/s11/       System 11 board: shared RAM, KEYCUS protection, EEPROM, ROM banks, gun board, C76 interface
+src/m37710/    M37702 / M37710 interpreter (System 11 C76 sound / I/O MCU)
 src/h8/        H8/3002 sound / I/O CPU
+src/sh2/       SH-2 (System 12 CD-XA board)
 src/sound/     C352
-src/romload/   MAME set tables, zip reader, ROM cache
+src/romload/   MAME set tables (System 12, System 11), zip reader, ROM cache
 src/sys/       Vita heap and JIT memory
+deps/          lightrec + GNU lightning (x86_64 recompiler), libchdr (CHD discs)
 vita/          PS Vita port: frontend, video output (vitaGL), platform code, LiveArea assets
-libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5)
+libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5) and its headless tests
+tools/         table generators (System 11 sets from MAME namcos11.cpp)
 ```
 
 ## 9. Accuracy and Testing
@@ -371,13 +381,18 @@ libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5)
   states and recorded input against reference screenshots, so that the game reaches the same scenes with the same
   picture and sound.
 - The R3000A and H8/3002 recompilers are compared against their interpreters in an ARM build of the harness.
+- libretro core: `libretro/tests/headless.py` runs every System 12 set and the System 11 sets with a hash file through
+  RetroArch (null drivers, scripted input) and compares the pictures with the recorded hashes. On x86_64 the lightrec
+  recompiler gives the interpreter's pictures exactly on every set; on the Pi 5, ari64 is checked against the
+  interpreter's screens.
 - Sound output is recorded on the device and compared with MAME.
 
 ## 10. License and Credits
 
 **License.** ReSys12 is distributed under the [GNU General Public License, version 3](LICENSE).
 - The pcsx_rearmed code and the ReSys12 code are GPL-2.0-or-later (pcsx_rearmed's license text is in `src/psx/COPYING`).
-- The MAME parts (System 12 board, H8/3002, C352) are BSD-3-Clause.
+- The MAME parts (System 12 and System 11 boards, H8/3002, M37710, C352) are BSD-3-Clause.
+- lightrec (libretro core, x86_64) is LGPL-2.1-or-later, GNU lightning LGPL-3.0-or-later, libchdr BSD-3-Clause.
 - vitaGL and vitaShaRK, linked into the Vita build, are LGPL-3.0, so the combined program and the release packages
   are distributed under GPL-3.0.
 
@@ -386,13 +401,15 @@ The original copyright headers are kept in all imported sources.
 **Credits**
 - [pcsx_rearmed](https://github.com/notaz/pcsx_rearmed) (notaz, Ari64 and contributors): R3000A, ari64 recompiler,
   GTE, gpulib and gpu_neon.
-- [MAME](https://www.mamedev.org/) developers: System 12 board, H8/3002, C352, AT28C16, ROM definitions and
-  hardware research.
+- [MAME](https://www.mamedev.org/) developers: System 12 and System 11 boards, H8/3002, M37710, C352, AT28C16, ROM
+  definitions and hardware research.
+- [lightrec](https://github.com/pcercuei/lightrec) (Paul Cercueil) and [GNU lightning](https://www.gnu.org/software/lightning/):
+  the x86_64 recompiler of the libretro core. [libchdr](https://github.com/rtissera/libchdr): CHD disc images.
 - [VitaSDK](https://vitasdk.org/), [vitaGL](https://github.com/Rinnegatamante/vitaGL) and
   [vitaShaRK](https://github.com/Rinnegatamante/vitaShaRK) (Rinnegatamante).
 - [JUnzip](https://github.com/jokkebk/JUnzip), [zlib](https://zlib.net/), [libpng](https://github.com/pnggroup/libpng).
 
-**Trademarks.** Namco, System 12 and all game titles are trademarks of their respective owners. This project is not
+**Trademarks.** Namco, System 11, System 12 and all game titles are trademarks of their respective owners. This project is not
 affiliated with or endorsed by Bandai Namco or any rights holder. No ROM images, game graphics or logos are
 included in this repository or in the release packages.
 
