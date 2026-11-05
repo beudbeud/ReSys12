@@ -558,6 +558,8 @@ int s12_analog_kind(const S12Game *g)
 		return S12_ANALOG_LEVER;
 	if (g->machine == S12_M_S11 && !strcmp(g->inputs, "pocketrc"))
 		return S12_ANALOG_WHEEL;
+	if (g->machine == S12_M_S11 && !strcmp(g->inputs, "ptblank2ua"))
+		return S12_ANALOG_GUN;
 	return S12_ANALOG_NONE;
 }
 
@@ -581,6 +583,9 @@ void s12_set_gun(int player, float fx, float fy)
 		const int gx = lerp_u16(fx, 0, 0x1ff), gy = lerp_u16(1.0f - fy, 0, 0x1ff);
 		s12.in.adc[1] = (uint16_t)((gx * 0x240) / 0x1ff + 0x7a);
 		s12.in.adc[2] = (uint16_t)((gy * 0x1bf) / 0x1ff + 0x1f);
+	} else if (g->machine == S12_M_S11) { // System 11 gun board (MAME ptblank2ua GUN1X / GUN1Y ranges)
+		s12.in.gun[player * 2] = lerp_u16(fx, 0xd8, 0x387);
+		s12.in.gun[player * 2 + 1] = lerp_u16(fy, 0x2c, 0x11b);
 	} else if (!strcmp(g->inputs, "ghlpanic")) {
 		s12.in.gun[player * 2] = lerp_u16(fx, 0xbe, 0x35f);
 		s12.in.gun[player * 2 + 1] = lerp_u16(fy, 0x1a, 0x109);

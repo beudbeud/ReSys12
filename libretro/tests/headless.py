@@ -18,7 +18,7 @@ import hashlib, os, platform, shutil, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROMS = os.environ.get("RS12_ROMS", os.path.expanduser("~/system12"))
 ROMS11 = os.environ.get("RS11_ROMS", os.path.expanduser("~/system11"))
-S11 = {"tekken2", "souledgea"}  # System 11 sets (RS11_ROMS, namcoc76.zip next to them)
+S11 = {"tekken2", "souledgea", "ptblank2ua", "gunbarla"}  # System 11 sets (RS11_ROMS, namcoc76.zip next to them)
 CORE = os.environ.get("RS12_CORE", os.path.join(HERE, "..", "resys12_libretro.so"))
 RETROARCH = os.environ.get("RETROARCH", "retroarch")
 ARCH = platform.machine()
@@ -79,6 +79,8 @@ SETS = {
     # System 11
     "tekken2": (3600, 300, PROBE),
     "souledgea": (3600, 300, PROBE),
+    "ptblank2ua": (4200, 300, COIN_START),  # System 11 gun sets: the gun at the screen centre, button 1 the trigger
+    "gunbarla": (4200, 300, COIN_START),
 }
 
 

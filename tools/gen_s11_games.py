@@ -11,7 +11,7 @@ MACH = {"tekken": ("S12_S_S11_ROM8", "C406"), "tekken2o": ("S12_S_S11_ROM8", "C4
         "souledge": ("S12_S_S11_ROM8", "C409"), "dunkmnia": ("S12_S_S11_ROM8", "C410"), "primglex": ("S12_S_S11_ROM8", "C411"),
         "xevi3dg": ("S12_S_S11_ROM8", "C430"), "danceyes": ("S12_S_S11_ROM8", "C431"), "pocketrc": ("S12_S_S11_ROM8", "C432"),
         "fambowl": ("S12_S_S11_ROM8", "C432"), "starswep": ("S12_S_S11_NOBANK", "C442"),
-        "myangel3": ("S12_S_S11_ROM8_64", "C443")}
+        "myangel3": ("S12_S_S11_ROM8_64", "C443"), "ptblank2ua": ("S12_S_S11_ROM8_64", "C443")}
 
 blocks = {}
 for m in re.finditer(r"ROM_START\(\s*(\w+)\s*\)(.*?)ROM_END", src, re.S):
@@ -22,7 +22,7 @@ for m in re.finditer(r'^GAME\(\s*(\d+),\s*(\w+),\s*(\w+),\s*(\w+),\s*(\w+),\s*\w
                      src, re.M):
     year, name, parent, mach, inp, rot, maker, title, flags = m.groups()
     if mach not in MACH:
-        continue  # ponytail: ptblank2ua / gunbarla (lightgun map) left out
+        continue
     state, keycus = MACH[mach]
     sizes = [0, 0, 0, 0]
     start = len(roms)

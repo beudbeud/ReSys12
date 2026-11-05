@@ -15,7 +15,7 @@
 
 #define BANK_SIZE 0x100000u // eight 1MB windows at 0x1f000000-0x1f7fffff
 
-enum { L_NAMCOS11, L_TEKKEN, L_SOULEDGE, L_MYANGEL3, L_POCKETRC }; // MAME input port sets
+enum { L_NAMCOS11, L_TEKKEN, L_SOULEDGE, L_MYANGEL3, L_POCKETRC, L_GUN }; // MAME input port sets
 
 static struct {
 	uint8_t bank[8];     // 1MB ROM entry of each window
@@ -34,7 +34,8 @@ void s11_attach(S12Rom *rom)
 	s_keycus = g->keycus[0] == 'C' ? atoi(g->keycus + 1) : 0;
 	s_map = g->state;
 	s_layout = !strcmp(g->inputs, "tekken") ? L_TEKKEN : !strcmp(g->inputs, "souledge") ? L_SOULEDGE :
-		!strcmp(g->inputs, "myangel3") ? L_MYANGEL3 : !strcmp(g->inputs, "pocketrc") ? L_POCKETRC : L_NAMCOS11;
+		!strcmp(g->inputs, "myangel3") ? L_MYANGEL3 : !strcmp(g->inputs, "pocketrc") ? L_POCKETRC :
+		!strcmp(g->inputs, "ptblank2ua") ? L_GUN : L_NAMCOS11;
 	s_entries = rom->rgn_size[S12_RGN_BANK] / BANK_SIZE;
 	s11_c76_init(rom->rgn[S12_RGN_IOCPU], rom->rgn_size[S12_RGN_IOCPU], rom->rgn[S12_RGN_SUB], rom->rgn_size[S12_RGN_SUB],
 		rom->rgn[S12_RGN_C352], rom->rgn_size[S12_RGN_C352]);
@@ -53,6 +54,8 @@ static void map_window(int i)
 	if (!s12_rom_all_ready)
 		s12_rom_wait(S12_RGN_BANK, o, BANK_SIZE);
 	psxMemMapRead(0x1f000000u + i * BANK_SIZE, BANK_SIZE, base + o);
+	if (i == 7 && s_layout == L_GUN) // the gun board's 0x1f780000 page goes to s11_r16 (MAME ptblank2ua_map)
+		psxMemMapRead(0x1f780000u, 0x10000u, NULL);
 }
 
 void s11_mem_reset(void)
@@ -187,6 +190,12 @@ int s11_r16(uint32_t a, uint16_t *v)
 		*v = s12.eeprom[((a - 0x1fa30000u) >> 1) & 0x7ff];
 		return 1;
 	}
+	if (s_layout == L_GUN && a - 0x1f780000u < 0x10u) { // MAME lightgun_r: X, Y, Y + 1 of each gun
+		static const int8_t port[8] = { 0, -1, 1, 1, 2, -1, 3, 3 };
+		const int o = (int)(a - 0x1f780000u) >> 1, p = port[o];
+		*v = p < 0 ? 0 : (uint16_t)(s12.in.gun[p] + ((o & 3) == 3));
+		return 1;
+	}
 	if (a < 0x1f800000u && s_entries && s_map != S12_S_S11_NOBANK) { // (the read LUT maps them: other paths)
 		const uint8_t *p = s12.rom->rgn[S12_RGN_BANK] + (s11.bank[(a >> 20) & 7] % s_entries) * BANK_SIZE + (a & (BANK_SIZE - 2));
 		*v = (uint16_t)(p[0] | p[1] << 8);
@@ -233,6 +242,8 @@ int s11_w16(uint32_t a, uint16_t d)
 		map_window(i);
 		return 1;
 	}
+	if (s_layout == L_GUN && a - 0x1f788000u < 4u) // lamps and recoil (MAME lightgun_w), not emulated
+		return 1;
 	if (s_map == S12_S_S11_ROM8_64 && a - 0x1f080000u < 4u) {
 		s11.bankoffset = ((a - 0x1f080000u) >> 1) * 16;
 		return 1;
@@ -266,7 +277,7 @@ void s11_vblank(int state)
 }
 
 // ---- inputs: s12.in (frontend, active high) -> the C76 ports as MAME's namcos11 / tekken / souledge / myangel3 /
-// pocketrc input ports read them (active low, all eight bits of each port declared, upper byte 0) ----
+// pocketrc / ptblank2ua input ports read them (active low, all eight bits of each port declared, upper byte 0) ----
 static uint16_t joy(uint32_t p, int b3)
 {
 	const uint32_t on = ((p & S12_IN_RIGHT) ? 0x01 : 0) | ((p & S12_IN_LEFT) ? 0x02 : 0) | ((p & S12_IN_DOWN) ? 0x04 : 0) |
@@ -308,6 +319,10 @@ void s11_update_inputs(void)
 		in.player4 = (p1 & S12_IN_B2) ? 0xf7 : 0xff;
 		in.adc[0] = (uint8_t)s12.in.adc[0];
 		in.adc[1] = (uint8_t)s12.in.adc[1];
+		break;
+	case L_GUN: // trigger (button 1) and start only (MAME ptblank2ua); the aim is read from the gun board
+		in.player1 |= 0x6f;
+		in.player2 |= 0x6f;
 		break;
 	}
 	s11_c76_set_inputs(&in);

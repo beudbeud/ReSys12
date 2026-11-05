@@ -392,6 +392,55 @@ static const S12RomEntry s11_roms[] = {
 	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0xbb1888a6, "kqt1sprog.7e" }, // myangel3
 	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x92ca8e4f, "kqt1wave.8k" }, // myangel3
 	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // myangel3
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000000, 0x0100000, 0x4926599d, "gnb2vera.2l" }, // ptblank2a
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000001, 0x0100000, 0x2aba8c09, "gnb2vera.2j" }, // ptblank2a
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200000, 0x0100000, 0xe6335e4e, "gnb1vera.2k" }, // ptblank2a
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200001, 0x0100000, 0x2bb7eb6d, "gnb1vera.2f" }, // ptblank2a
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000000, 0x0400000, 0x8a8e77c3, "gnb2prg.1" }, // ptblank2a
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000001, 0x0400000, 0x563edc3f, "gnb2prg.2" }, // ptblank2a
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800000, 0x0400000, 0x94fbe733, "gnb2prg.3" }, // ptblank2a
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800001, 0x0400000, 0x1cbe79a6, "gnb2prg.4" }, // ptblank2a
+	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0x6461ae77, "gnb1vera.6d" }, // ptblank2a
+	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x4e19d9d6, "gnb1wave.8k" }, // ptblank2a
+	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // ptblank2a
+	{ S12_RGN_MAIN, S12_LD_PLAIN, 0, 0x0000000, 0x0200000, 0xdf0bc5f0, "gnb2vera.1j" }, // ptblank2b
+	{ S12_RGN_MAIN, S12_LD_PLAIN, 0, 0x0200000, 0x0200000, 0x8a274d96, "gnb2vera.1l" }, // ptblank2b
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000000, 0x0400000, 0x8a8e77c3, "gnb2prg.1" }, // ptblank2b
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000001, 0x0400000, 0x563edc3f, "gnb2prg.2" }, // ptblank2b
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800000, 0x0400000, 0x94fbe733, "gnb2prg.3" }, // ptblank2b
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800001, 0x0400000, 0x1cbe79a6, "gnb2prg.4" }, // ptblank2b
+	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0x6461ae77, "gnb1vera.7e" }, // ptblank2b
+	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x4e19d9d6, "gnb1wave.8k" }, // ptblank2b
+	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // ptblank2b
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000000, 0x0100000, 0xc2a02ccf, "gnb2verx.2l" }, // ptblank2c
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000001, 0x0100000, 0x96abd746, "gnb2verx.2j" }, // ptblank2c
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200000, 0x0100000, 0xe6335e4e, "gnb1vera.2k" }, // ptblank2c
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200001, 0x0100000, 0x2bb7eb6d, "gnb1vera.2f" }, // ptblank2c
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000000, 0x0400000, 0x8a8e77c3, "gnb2prg.1" }, // ptblank2c
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000001, 0x0400000, 0x563edc3f, "gnb2prg.2" }, // ptblank2c
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800000, 0x0400000, 0x94fbe733, "gnb2prg.3" }, // ptblank2c
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0800001, 0x0400000, 0x1cbe79a6, "gnb2prg.4" }, // ptblank2c
+	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0x6461ae77, "gnb1vera.6d" }, // ptblank2c
+	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x4e19d9d6, "gnb1wave.8k" }, // ptblank2c
+	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // ptblank2c
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000000, 0x0100000, 0x57ad719a, "gnb3vera.2l" }, // ptblank2ua
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000001, 0x0100000, 0x0378af98, "gnb3vera.2j" }, // ptblank2ua
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200000, 0x0100000, 0xe6335e4e, "gnb1vera.2k" }, // ptblank2ua
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200001, 0x0100000, 0x2bb7eb6d, "gnb1vera.2f" }, // ptblank2ua
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000000, 0x0800000, 0x78746037, "gnb1prg0l.ic2" }, // ptblank2ua
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000001, 0x0800000, 0x697d3279, "gnb1prg0u.ic5" }, // ptblank2ua
+	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0x6461ae77, "gnb1vera.6d" }, // ptblank2ua
+	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x4e19d9d6, "gnb1wave.8k" }, // ptblank2ua
+	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // ptblank2ua
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000000, 0x0100000, 0x405e2585, "gnb1vera.2l" }, // gunbarla
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0000001, 0x0100000, 0x2d2af8cf, "gnb1vera.2j" }, // gunbarla
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200000, 0x0100000, 0xe6335e4e, "gnb1vera.2k" }, // gunbarla
+	{ S12_RGN_MAIN, S12_LD_16_BYTE, 0, 0x0200001, 0x0100000, 0x2bb7eb6d, "gnb1vera.2f" }, // gunbarla
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000000, 0x0800000, 0x78746037, "gnb1prg0l.ic2" }, // gunbarla
+	{ S12_RGN_BANK, S12_LD_16_BYTE, 0, 0x0000001, 0x0800000, 0x697d3279, "gnb1prg0u.ic5" }, // gunbarla
+	{ S12_RGN_SUB, S12_LD_PLAIN, 0, 0x0000000, 0x0040000, 0x6461ae77, "gnb1vera.6d" }, // gunbarla
+	{ S12_RGN_C352, S12_LD_PLAIN, 0, 0x0000000, 0x0400000, 0x4e19d9d6, "gnb1wave.8k" }, // gunbarla
+	{ S12_RGN_C352, S12_LD_RELOAD, 0, 0x0800000, 0x0400000, 0, "" }, // gunbarla
 };
 
 static const S12Game s11_games[] = {
@@ -426,6 +475,11 @@ static const S12Game s11_games[] = {
 	{ "starswep", "", "Star Sweep (World, STP2/VER.A)", "Axela / Namco", 1997, S12_M_S11, S12_S_S11_NOBANK, "namcos11", 0, 0, "C442", 0x400000, 0x0, 0x80000, 0x1000000, 364, 7 },
 	{ "starswepj", "starswep", "Star Sweep (Japan, STP1/VER.A)", "Axela / Namco", 1997, S12_M_S11, S12_S_S11_NOBANK, "namcos11", 0, 0, "C442", 0x400000, 0x0, 0x80000, 0x1000000, 371, 5 },
 	{ "myangel3", "", "Kosodate Quiz My Angel 3 (Japan, KQT1/VER.A)", "MOSS / Namco", 1998, S12_M_S11, S12_S_S11_ROM8_64, "myangel3", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 376, 9 },
+	{ "ptblank2a", "ptblank2", "Point Blank 2 (World, GNB2/VER.A)", "Namco", 1999, S12_M_S11, S12_S_S11_ROM8_64, "ptblank2ua", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 385, 11 },
+	{ "ptblank2b", "ptblank2", "Point Blank 2 (World, GNB2/VER.A alt)", "Namco", 1999, S12_M_S11, S12_S_S11_ROM8_64, "ptblank2ua", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 396, 9 },
+	{ "ptblank2c", "ptblank2", "Point Blank 2 (World, unknown version)", "Namco", 1999, S12_M_S11, S12_S_S11_ROM8_64, "ptblank2ua", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 405, 11 },
+	{ "ptblank2ua", "ptblank2", "Point Blank 2 (US, GNB3/VER.A)", "Namco", 1999, S12_M_S11, S12_S_S11_ROM8_64, "ptblank2ua", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 416, 9 },
+	{ "gunbarla", "ptblank2", "Gunbarl (Japan, GNB1/VER.A)", "Namco", 1999, S12_M_S11, S12_S_S11_ROM8_64, "ptblank2ua", 0, 0, "C443", 0x400000, 0x2000000, 0x80000, 0x1000000, 425, 9 },
 };
 #define S11_NUM_GAMES ((int)(sizeof(s11_games) / sizeof(s11_games[0])))
 

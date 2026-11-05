@@ -337,17 +337,18 @@ protection, EEPROM and ROM banks, plus the C76 sound / I/O MCU (an M37710 interp
 The C76 BIOS `namcoc76.zip` (`c76.bin`) must sit next to the sets. Headless runs read System 11 sets from `RS11_ROMS`
 (default `~/system11`).
 
-Statuses from headless runs (3600 frames, coin, start and buttons) on x86_64 (interpreter, and lightrec: same pictures)
-and on the Raspberry Pi 5 (ari64: the same screens as the interpreter); no set was played by hand yet.
+Statuses: played on a Raspberry Pi 5 (Recalbox, ari64), plus headless runs (3600 frames, coin, start and buttons) on
+x86_64 (interpreter, and lightrec: same pictures) and on the Pi 5.
 
 | Set | Status |
 |---|---|
-| `tekken2`, `souledgea` | Playable: attract, coin, character select and fights, with sound |
-| `dunkmnia`, `primglex`, `starswep`, `xevi3dg`, `pocketrc` | Boots: the runs reach gameplay |
-| `danceyes`, `myangel3` | Boots: title and menus |
-| `fambowl` | Boots: waits on "put the ball back" (the lane's sensors) |
+| `tekken2`, `souledgea`, `dunkmnia`, `primglex`, `starswep`, `xevi3dg`, `pocketrc`, `danceyes`, `myangel3` | Playable |
+| `ptblank2a`, `ptblank2b`, `ptblank2c`, `ptblank2ua`, `gunbarla` | Playable in the headless runs (gun at the screen centre); gun as on System 12 (RetroArch lightgun, or the left stick) |
 | `tekken` | Boots; textures and HUD wrong (COH-100 board, CXD8538Q GPU) |
-| other sets in `src/romload/s11_games.h` | Untested; the gun sets (`ptblank2a`, `gunbarla`...) are not in the table |
+| `fambowl` | Not working: waits on "put the ball back" (the bowling lane's sensors are not emulated) |
+| other clones in `src/romload/s11_games.h` | Untested |
+
+The gun sets are clones of the System 12 `ptblank2`: they read the files they share with it from `ptblank2.zip`.
 
 ## 8. Project Layout
 
