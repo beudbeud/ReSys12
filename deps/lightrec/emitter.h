@@ -15,5 +15,6 @@ struct opcode;
 void lightrec_rec_opcode(struct lightrec_cstate *state, const struct block *block, u16 offset);
 void lightrec_emit_jump_to_interpreter(struct lightrec_cstate *state,
 				       const struct block *block, u16 offset);
+void rs12_emit_gen_check(struct lightrec_cstate *state, const struct block *block);
 
 #endif /* __EMITTER_H__ */

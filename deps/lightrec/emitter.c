@@ -164,6 +164,49 @@ static void lightrec_emit_end_of_block(struct lightrec_cstate *state,
 	lightrec_regcache_reset(reg_cache);
 }
 
+// ReSys12: at the block's entry, before anything ran: when a store reached its RAM granules since it was hashed,
+// clear its LUT entry and go back to the dispatcher, which checks the hash (recompiles it if the code changed).
+// JIT_R1 / JIT_R2 only: JIT_R0 can be the cycle register (LIGHTREC_REG_CYCLE)
+void rs12_emit_gen_check(struct lightrec_cstate *state, const struct block *block)
+{
+	const struct lightrec_state *lstate = state->state;
+	jit_state_t *_jit = block->_jit;
+	jit_node_t *same;
+	u32 first, last, g;
+
+	if (!rs12_block_granules(block, &first, &last))
+		return;
+
+	jit_ldxi_ui(JIT_R1, LIGHTREC_REG_STATE, lightrec_offset(rs12_gen) + first * 4);
+	for (g = first + 1; g <= last; g++) {
+		jit_ldxi_ui(JIT_R2, LIGHTREC_REG_STATE, lightrec_offset(rs12_gen) + g * 4);
+		jit_addr(JIT_R1, JIT_R1, JIT_R2);
+	}
+	if (__WORDSIZE == 64)
+		jit_extr_ui(JIT_R1, JIT_R1);
+	jit_movi(JIT_R2, (uintptr_t)&block->rs12_gen);
+	jit_ldr_ui(JIT_R2, JIT_R2);
+	same = jit_beqr(JIT_R1, JIT_R2);
+
+	jit_movi(JIT_R1, 0);
+	if (lut_is_32bit(lstate))
+		jit_stxi_i(lightrec_offset(code_lut) + lut_offset(block->pc) * 4, LIGHTREC_REG_STATE, JIT_R1);
+	else
+		jit_stxi(lightrec_offset(code_lut) + lut_offset(block->pc) * sizeof(void *), LIGHTREC_REG_STATE, JIT_R1);
+
+	if (lightrec_store_next_pc()) {
+		jit_movi(JIT_R1, block->pc);
+		jit_stxi_i(lightrec_offset(next_pc), LIGHTREC_REG_STATE, JIT_R1);
+	} else {
+		jit_movi(JIT_V0, block->pc);
+	}
+	lightrec_jump_to_eob(state, _jit);
+
+	jit_patch(same);
+	if (!arch_has_fast_mask())
+		jit_movi(JIT_R1, 0x1fffffff); // (the dispatcher's preload)
+}
+
 void lightrec_emit_jump_to_interpreter(struct lightrec_cstate *state,
 				       const struct block *block, u16 offset)
 {
@@ -1360,6 +1403,33 @@ static void rec_and_mask(struct lightrec_cstate *cstate,
 	}
 }
 
+// ReSys12: bump the store generation of the RAM granule of the address in addr_reg (+ imm), g and v are temps
+static void rs12_emit_bump_gen_regs(jit_state_t *_jit, u8 addr_reg, s16 imm, u8 g, u8 v)
+{
+	if (imm)
+		jit_addi(g, addr_reg, imm);
+	else
+		jit_movr(g, addr_reg);
+	jit_andi(g, g, RAM_SIZE - 1);
+	jit_rshi_u(g, g, RS12_GEN_SHIFT);
+	jit_lshi(g, g, 2);
+	jit_add_state(g, g);
+	jit_ldxi_ui(v, g, lightrec_offset(rs12_gen));
+	jit_addi(v, v, 1);
+	jit_stxi_i(lightrec_offset(rs12_gen), g, v);
+}
+
+static void rs12_emit_bump_gen(struct lightrec_cstate *cstate, jit_state_t *_jit, u8 addr_reg, s16 imm)
+{
+	struct regcache *reg_cache = cstate->reg_cache;
+	u8 g = lightrec_alloc_reg_temp(reg_cache, _jit);
+	u8 v = lightrec_alloc_reg_temp(reg_cache, _jit);
+
+	rs12_emit_bump_gen_regs(_jit, addr_reg, imm, g, v);
+	lightrec_free_reg(reg_cache, v);
+	lightrec_free_reg(reg_cache, g);
+}
+
 static void rec_store_memory(struct lightrec_cstate *cstate,
 			     const struct block *block,
 			     u16 offset, jit_code_t code,
@@ -1432,6 +1502,7 @@ static void rec_store_memory(struct lightrec_cstate *cstate,
 	lightrec_free_reg(reg_cache, src_reg);
 
 	if (invalidate) {
+		rs12_emit_bump_gen(cstate, _jit, addr_reg, imm); // ReSys12
 		tmp3 = lightrec_alloc_reg_in(reg_cache, _jit, 0, 0);
 
 		if (c.i.op != OP_SW) {
@@ -1588,7 +1659,7 @@ static void rec_store_direct(struct lightrec_cstate *cstate, const struct block 
 	jit_state_t *_jit = block->_jit;
 	jit_node_t *to_not_ram, *to_end;
 	bool swc2 = c.i.op == OP_SWC2;
-	u8 src_reg, addr_reg, tmp, tmp2, tmp3, rs, rt, reg_imm, reg_ram_size;
+	u8 src_reg, addr_reg, tmp, tmp2, tmp3, rs, rt, reg_imm, reg_ram_size, gen_g, gen_v;
 	u8 in_reg = swc2 ? REG_TEMP : c.i.rt;
 	u32 mask;
 	bool different_offsets = state->offset_ram != state->offset_scratch;
@@ -1611,6 +1682,8 @@ static void rec_store_direct(struct lightrec_cstate *cstate, const struct block 
 
 	lightrec_free_reg(reg_cache, rs);
 	tmp = lightrec_alloc_reg_temp(reg_cache, _jit);
+	gen_g = lightrec_alloc_reg_temp(reg_cache, _jit); // ReSys12
+	gen_v = lightrec_alloc_reg_temp(reg_cache, _jit);
 
 	mask = c.i.op == OP_SW ? RAM_SIZE - 1 : (RAM_SIZE - 1) & ~3;
 
@@ -1633,6 +1706,9 @@ static void rec_store_direct(struct lightrec_cstate *cstate, const struct block 
 
 	/* Compute the offset to the code LUT */
 	jit_andr(tmp, addr_reg, reg_imm);
+	rs12_emit_bump_gen_regs(_jit, tmp, 0, gen_g, gen_v); // ReSys12
+	lightrec_free_reg(reg_cache, gen_v);
+	lightrec_free_reg(reg_cache, gen_g);
 
 	if (!lut_is_32bit(state))
 		jit_lshi(tmp, tmp, 1);

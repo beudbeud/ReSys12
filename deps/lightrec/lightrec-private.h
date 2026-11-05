@@ -87,6 +87,7 @@
 
 // ReSys12: Namco System 12: 4MB of RAM (mirrored once in the 8MB window), 4MB program flash in place of the BIOS
 #define RAM_SIZE	0x400000
+#define RS12_GEN_SHIFT	8
 #define BIOS_SIZE	0x400000
 
 #define CODE_LUT_SIZE	((RAM_SIZE + BIOS_SIZE) >> 2)
@@ -122,6 +123,7 @@ struct block {
 	struct block *next;
 	u32 pc;
 	u32 hash;
+	u32 rs12_gen; // ReSys12: sum of the store generations of the RAM granules the block covers, when hashed
 	u32 precompile_date;
 	unsigned int code_size;
 	u16 nb_ops;
@@ -222,6 +224,9 @@ struct lightrec_state {
 	u32 opt_flags;
 	_Bool with_32bit_lut;
 	_Bool mirrors_mapped;
+	// ReSys12: a store generation per 256-byte RAM granule, bumped by every store that invalidates: a block whose
+	// granules moved since it was hashed goes back to the dispatcher (code written inside a block, not at its start)
+	u32 rs12_gen[RAM_SIZE >> RS12_GEN_SHIFT];
 	void *code_lut[];
 };
 
@@ -244,6 +249,30 @@ static inline u32 kunseg(u32 addr)
 		return addr - 0xa0000000;
 	else
 		return addr &~ 0x80000000;
+}
+
+// ReSys12: the RAM granules of a block (none outside RAM) and the sum of their store generations
+static inline _Bool rs12_block_granules(const struct block *block, u32 *first, u32 *last)
+{
+	const u32 a = kunseg(block->pc);
+
+	if (a >= 0x00800000 || !block->nb_ops)
+		return 0;
+	*first = (a & (RAM_SIZE - 1)) >> RS12_GEN_SHIFT;
+	*last = ((a & (RAM_SIZE - 1)) + block->nb_ops * 4 - 1) >> RS12_GEN_SHIFT;
+	if (*last >= (RAM_SIZE >> RS12_GEN_SHIFT))
+		*last = (RAM_SIZE >> RS12_GEN_SHIFT) - 1;
+	return 1;
+}
+
+static inline u32 rs12_block_gen(const struct lightrec_state *state, const struct block *block)
+{
+	u32 first, last, sum = 0;
+
+	if (rs12_block_granules(block, &first, &last))
+		for (; first <= last; first++)
+			sum += state->rs12_gen[first];
+	return sum;
 }
 
 static inline u32 lut_offset(u32 pc)

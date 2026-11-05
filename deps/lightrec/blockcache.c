@@ -230,6 +230,8 @@ bool lightrec_block_is_outdated(struct lightrec_state *state, struct block *bloc
 
 	outdated = block->hash != lightrec_calculate_block_hash(block);
 	if (likely(!outdated)) {
+		block->rs12_gen = rs12_block_gen(state, block); // ReSys12: the stores since the hash left the code as is
+
 		/* The block was marked as outdated, but the content is still
 		 * the same */
 

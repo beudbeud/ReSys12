@@ -215,10 +215,26 @@ static void lightrec_lwc2(struct lightrec_state *state, union code op,
 	lightrec_mtc2(state, op.i.rt, data);
 }
 
+// ReSys12: a store into [addr, addr + len) of RAM
+static void rs12_bump_gen(struct lightrec_state *state, u32 addr, u32 len)
+{
+	u32 g, last;
+
+	if (!len)
+		return;
+	addr &= RAM_SIZE - 1;
+	last = (addr + len - 1) >> RS12_GEN_SHIFT;
+	if (last >= (RAM_SIZE >> RS12_GEN_SHIFT))
+		last = (RAM_SIZE >> RS12_GEN_SHIFT) - 1;
+	for (g = addr >> RS12_GEN_SHIFT; g <= last; g++)
+		state->rs12_gen[g]++;
+}
+
 static void lightrec_invalidate_map(struct lightrec_state *state,
 		const struct lightrec_mem_map *map, u32 addr, u32 len)
 {
 	if (map == &state->maps[PSX_MAP_KERNEL_USER_RAM]) {
+		rs12_bump_gen(state, addr, len);
 		memset(lut_address(state, lut_offset(addr)), 0,
 		       ((len + 3) / 4) * lut_elm_size(state));
 	}
@@ -1465,6 +1481,7 @@ static struct block * lightrec_precompile_block(struct lightrec_state *state,
 		block_set_flags(block, block_flags);
 
 	block->hash = lightrec_calculate_block_hash(block);
+	block->rs12_gen = rs12_block_gen(state, block); // ReSys12
 
 	if (OPT_REPLACE_MEMSET && block_has_flag(block, BLOCK_IS_MEMSET))
 		addr = state->memset_func;
@@ -1602,6 +1619,8 @@ int lightrec_compile_block(struct lightrec_cstate *cstate,
 
 	jit_prolog();
 	jit_tramp(256);
+
+	rs12_emit_gen_check(cstate, block); // ReSys12
 
 	start_of_block = jit_label();
 
@@ -2107,6 +2126,7 @@ void lightrec_invalidate(struct lightrec_state *state, u32 addr, u32 len)
 
 	memset(lut_address(state, lut_offset(kaddr)), 0,
 	       ((len + 3) / 4) * lut_elm_size(state));
+	rs12_bump_gen(state, kaddr, len); // ReSys12
 }
 
 void lightrec_invalidate_all(struct lightrec_state *state)
