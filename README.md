@@ -3,8 +3,13 @@
 <p align="center">
   <b>Namco System 12 and System 11 arcade emulator, as a libretro core</b><br>
   pcsx_rearmed based &middot; R3000A dynarecs (aarch64, ARMv7, x86_64) &middot; NEON GPU rasterizer &middot; C352 sound<br>
-  <a href="https://www.patreon.com/Reyanon">Support on Patreon</a> or <a href="https://ko-fi.com/reyanon">Ko-Fi</a>
+  Fork of <a href="https://github.com/Reyanon/ReSys12">ReSys12</a> by Reyanon
 </p>
+
+> This repository is a fork of [Reyanon/ReSys12](https://github.com/Reyanon/ReSys12), the Namco System 12 emulator for
+> PlayStation Vita. It keeps the emulation and makes it a libretro core: System 11 support, the lightrec recompiler on
+> x86_64, Recalbox packaging. The PS Vita port is not here: get it from the
+> [original project](https://github.com/Reyanon/ReSys12) and its releases.
 
 ---
 
@@ -19,7 +24,6 @@
 7. [Project Layout](#7-project-layout)
 8. [Accuracy and Testing](#8-accuracy-and-testing)
 9. [License and Credits](#9-license-and-credits)
-10. [Support](#10-support)
 
 ---
 
@@ -214,6 +218,8 @@ tools/         table generators (System 11 sets from MAME namcos11.cpp)
 The original copyright headers are kept in all imported sources.
 
 **Credits**
+- [ReSys12](https://github.com/Reyanon/ReSys12) (Reyanon): the emulator this fork comes from, up to v0.1.286 (the
+  System 12 emulation and the PS Vita port).
 - [pcsx_rearmed](https://github.com/notaz/pcsx_rearmed) (notaz, Ari64 and contributors): R3000A, ari64 recompiler,
   GTE, gpulib and gpu_neon.
 - [MAME](https://www.mamedev.org/) developers: System 12 and System 11 boards, H8/3002, M37710, C352, AT28C16, ROM
@@ -226,9 +232,3 @@ The original copyright headers are kept in all imported sources.
 is not affiliated with or endorsed by Bandai Namco or any rights holder. No ROM images, game graphics or logos are
 included in this repository.
 
-## 10. Support
-
-ReSys12 is free software. If you want to support its development, you can do so on
-[Patreon](https://www.patreon.com/Reyanon) or [Ko-Fi](https://ko-fi.com/reyanon). Support is for the emulator work only.
-
-**ROMs are never provided, to anyone, including supporters.** Do not ask for them.
