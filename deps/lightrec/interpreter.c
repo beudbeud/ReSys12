@@ -178,7 +178,9 @@ static u32 int_delay_slot(struct interpreter *inter, u32 pc, bool branch)
 		 */
 		epc = state->regs.cp0[14];
 
-		if (epc == pc - 4) {
+		// ReSys12: off: the IRQs are taken before a GTE opcode as in the interpreter, whose psxException
+		// runs it already (the handler then returns past it): going back to it would run it twice (tenkomor)
+		if (0 && epc == pc - 4) {
 			op_next = lightrec_read_opcode(state, epc);
 			if (op_next.i.op == OP_CP2)
 				pc -= 4;

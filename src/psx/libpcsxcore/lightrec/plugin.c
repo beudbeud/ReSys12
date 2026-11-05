@@ -630,10 +630,16 @@ again:
 				print_for_big_ass_debugger();
 			exit(1);
 		}
-		else if (flags & LIGHTREC_EXIT_SYSCALL)
-			psxException(R3000E_Syscall << 2, 0, (psxCP0Regs *)regs->cp0);
-		else if (flags & LIGHTREC_EXIT_BREAK)
-			psxException(R3000E_Bp << 2, 0, (psxCP0Regs *)regs->cp0);
+		else if (flags & (LIGHTREC_EXIT_SYSCALL | LIGHTREC_EXIT_BREAK)) {
+			// ReSys12: the handler runs on without the events being checked here: the interpreter's
+			// intException runs them at the handler's first branch (psxBranchTest), not at the exception
+			s32 left;
+			psxException((flags & LIGHTREC_EXIT_SYSCALL ? R3000E_Syscall : R3000E_Bp) << 2, 0,
+				     (psxCP0Regs *)regs->cp0);
+			left = psxRegs.next_interupt - psxRegs.cycle;
+			cycles_pcsx = left > 0 ? left : 1;
+			goto again;
+		}
 		else if (flags & LIGHTREC_EXIT_UNKNOWN_OP) {
 			u32 op = intFakeFetch(psxRegs.pc);
 			u32 hlec = op & 0x03ffffff;

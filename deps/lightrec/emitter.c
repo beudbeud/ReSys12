@@ -48,6 +48,26 @@ lightrec_jump_to_eob(struct lightrec_cstate *state, jit_state_t *_jit)
 	lightrec_jump_to_fn(_jit, state->state->eob_wrapper_func);
 }
 
+// ReSys12: end the block at an MTC0 without the dispatcher's cycle check: the next block's first branch leaves
+// when the budget is out, as the interpreter's psxBranchTest. The pending cycles are subtracted here
+static void rs12_emit_eob_nocheck(struct lightrec_cstate *state, const struct block *block, u16 offset)
+{
+	struct regcache *reg_cache = state->reg_cache;
+	jit_state_t *_jit = block->_jit;
+	u32 imm = block->pc + (offset << 2);
+
+	lightrec_clean_regs(reg_cache, _jit);
+	lightrec_load_next_pc_imm(reg_cache, _jit, block->pc, imm);
+	if (state->cycles)
+		jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE, state->cycles);
+	jit_movi(JIT_V1, (uintptr_t)lut_address(state->state, lut_offset(imm)));
+	if (lut_is_32bit(state->state))
+		jit_ldr_ui(JIT_V1, JIT_V1);
+	else
+		jit_ldr(JIT_V1, JIT_V1);
+	lightrec_jump_to_fn(_jit, state->state->eob_nocheck);
+}
+
 static void lightrec_jump_to_known_eob(struct lightrec_cstate *state,
 				       jit_state_t *_jit, u32 imm)
 {
@@ -2188,12 +2208,12 @@ static void rec_mtc(struct lightrec_cstate *state, const struct block *block, u1
 
 	call_to_c_wrapper(state, block, c.opcode, C_WRAPPER_MTC);
 
-	if (c.i.op == OP_CP0 &&
-	    !op_flag_no_ds(block->opcode_list[offset].flags) &&
-	    (c.r.rd == 12 || c.r.rd == 13))
-		lightrec_emit_end_of_block(state, block, offset, -1,
-					   get_ds_pc(block, offset, 1),
-					   0, 0, true);
+	// ReSys12: the block ends here, on to the next one without the cycle check (see rec_mtc0); the cycles
+	// were synced before the call (nothing pending)
+	if (c.i.op == OP_CP0 && (c.r.rd == 12 || c.r.rd == 13)) {
+		state->cycles += lightrec_cycles_of_opcode(state->state, c);
+		rs12_emit_eob_nocheck(state, block, offset + 1);
+	}
 }
 
 static void
@@ -2324,6 +2344,12 @@ rec_mtc0(struct lightrec_cstate *state, const struct block *block, u16 offset)
 	}
 
 	if (c.r.rd == 12 || c.r.rd == 13) {
+		// ReSys12: a software interrupt leaves the block now (as psxTestSWInts); otherwise the block goes on
+		// (it ended here, so a cycle budget out was seen at the MTC0 instead of at the next branch, where
+		// the interpreter's psxBranchTest runs the events)
+		struct native_register *regs_backup;
+		u32 pc_next = block->pc + ((offset + 1) << 2);
+
 		to_end = jit_beqi(tmp, 0);
 
 		jit_ldxi_i(tmp2, LIGHTREC_REG_STATE, lightrec_offset(target_cycle));
@@ -2332,17 +2358,24 @@ rec_mtc0(struct lightrec_cstate *state, const struct block *block, u16 offset)
 		jit_stxi_i(lightrec_offset(target_cycle), LIGHTREC_REG_STATE, tmp2);
 		jit_stxi_i(lightrec_offset(current_cycle), LIGHTREC_REG_STATE, tmp2);
 
-
-		jit_patch(to_end);
-
 		lightrec_free_reg(reg_cache, tmp);
 		lightrec_free_reg(reg_cache, tmp2);
+
+		regs_backup = lightrec_regcache_enter_branch(reg_cache);
+		lightrec_clean_regs(reg_cache, _jit);
+		lightrec_load_next_pc_imm(reg_cache, _jit, block->pc, pc_next);
+		jit_subi(LIGHTREC_REG_CYCLE, LIGHTREC_REG_CYCLE,
+			 state->cycles + lightrec_cycles_of_opcode(state->state, c));
+		lightrec_jump_to_known_eob(state, _jit, pc_next);
+		lightrec_regcache_leave_branch(reg_cache, regs_backup);
+
+		jit_patch(to_end);
 	}
 
-	if (!op_flag_no_ds(block->opcode_list[offset].flags) &&
-	    (c.r.rd == 12 || c.r.rd == 13)) {
+	// ReSys12: the block ends here (lightrec_get_mips_block_len): on to the next one without the cycle check
+	if (c.r.rd == 12 || c.r.rd == 13) {
 		state->cycles += lightrec_cycles_of_opcode(state->state, c);
-		lightrec_emit_eob(state, block, offset + 1);
+		rs12_emit_eob_nocheck(state, block, offset + 1);
 	}
 }
 

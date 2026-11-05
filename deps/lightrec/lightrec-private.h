@@ -212,6 +212,7 @@ struct lightrec_state {
 	void (*memset_func)(void);
 	void (*get_next_block)(void);
 	void (*fast_eob)(void);
+	void (*eob_nocheck)(void); // ReSys12: the dispatcher past its cycle check (a block ending at an MTC0)
 	struct lightrec_ops ops;
 	unsigned int nb_precompile;
 	unsigned int nb_compile;

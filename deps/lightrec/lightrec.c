@@ -1094,7 +1094,7 @@ static struct block * generate_dispatcher(struct lightrec_state *state)
 	struct block *block;
 	jit_state_t *_jit;
 	jit_node_t *to_end, *to_loop, *to_slow_path, *loop, *loop2,
-		   *addr, *addr2, *addr3, *addr4, *addr5, *addr6;
+		   *addr, *addr2, *addr3, *addr4, *addr5, *addr6, *addr7;
 	unsigned int i;
 
 	block = lightrec_malloc(state, MEM_FOR_IR, sizeof(*block));
@@ -1153,6 +1153,10 @@ static struct block * generate_dispatcher(struct lightrec_state *state)
 
 	/* Jump to end if state->target_cycle < state->current_cycle */
 	to_end = jit_blei(LIGHTREC_REG_CYCLE, 0);
+
+	// ReSys12: a block ending at an MTC0 jumps here with the LUT entry in JIT_V1: no cycle check there (the
+	// interpreter runs the events at branches only), the next block's first branch leaves
+	addr7 = jit_indirect();
 
 	/* Store back the current PC to the lightrec_state structure */
 	jit_stxi_i(lightrec_offset(curr_pc), LIGHTREC_REG_STATE, JIT_V0);
@@ -1307,6 +1311,7 @@ static struct block * generate_dispatcher(struct lightrec_state *state)
 	if (OPT_REPLACE_MEMSET)
 		state->memset_func = jit_address(addr3);
 	state->fast_eob = jit_address(addr6);
+	state->eob_nocheck = jit_address(addr7); // ReSys12
 	state->get_next_block = jit_address(addr);
 
 	if (ENABLE_DISASSEMBLER) {

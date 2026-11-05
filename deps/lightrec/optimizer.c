@@ -16,6 +16,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// ReSys12: a branch known never taken (or to the instruction after its slot) stays: the interpreter checks the
+// events at every branch, taken or not (psxBranchTest), so removing it takes an IRQ later (toukon3: bne on a
+// register zeroed in the same block, turned into bne $zero,$zero then into a NOP)
+#define RS12_DROP_NEVER_TAKEN 0
+
 #define IF_OPT(opt, ptr) ((opt) ? (ptr) : NULL)
 
 struct optimizer_list {
@@ -496,13 +501,13 @@ static bool is_nop(union code op)
 	case OP_ADDIU:
 		return op.i.rt == op.i.rs && op.i.imm == 0;
 	case OP_BGTZ:
-		return (op.i.rs == 0 || op.i.imm == 1);
+		return RS12_DROP_NEVER_TAKEN && (op.i.rs == 0 || op.i.imm == 1);
 	case OP_REGIMM:
-		return (op.i.op == OP_REGIMM_BLTZ ||
+		return RS12_DROP_NEVER_TAKEN && (op.i.op == OP_REGIMM_BLTZ ||
 				op.i.op == OP_REGIMM_BLTZAL) &&
 			(op.i.rs == 0 || op.i.imm == 1);
 	case OP_BNE:
-		return (op.i.rs == op.i.rt || op.i.imm == 1);
+		return RS12_DROP_NEVER_TAKEN && (op.i.rs == op.i.rt || op.i.imm == 1);
 	default:
 		return false;
 	}
@@ -961,7 +966,7 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 
 				op->i.rs = 0;
 				op->i.rt = 0;
-			} else if (v[op->i.rs].known & v[op->i.rt].known &
+			} else if (RS12_DROP_NEVER_TAKEN && v[op->i.rs].known & v[op->i.rt].known &
 				   (v[op->i.rs].value ^ v[op->i.rt].value)) {
 				pr_debug("Found never-taken BEQ\n");
 
@@ -988,7 +993,7 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 				op->i.op = OP_BEQ;
 				op->i.rs = 0;
 				op->i.rt = 0;
-			} else if (is_known(v, op->i.rs) && is_known(v, op->i.rt) &&
+			} else if (RS12_DROP_NEVER_TAKEN && is_known(v, op->i.rs) && is_known(v, op->i.rt) &&
 				   v[op->i.rs].value == v[op->i.rt].value) {
 				pr_debug("Found never-taken BNE\n");
 
@@ -1019,7 +1024,7 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 			break;
 
 		case OP_BGTZ:
-			if (v[op->i.rs].known & BIT(31) &&
+			if (RS12_DROP_NEVER_TAKEN && v[op->i.rs].known & BIT(31) &&
 			    v[op->i.rs].value & BIT(31)) {
 				pr_debug("Found never-taken BGTZ\n");
 
@@ -1115,7 +1120,7 @@ static int lightrec_transform_ops(struct lightrec_state *state, struct block *bl
 					op->i.op = OP_BEQ;
 					op->i.rs = 0;
 					op->i.rt = 0;
-				} else {
+				} else if (RS12_DROP_NEVER_TAKEN) {
 					pr_debug("Found never-taken BLTZ/BGEZ\n");
 
 					if (!op_flag_no_ds(op->flags))
