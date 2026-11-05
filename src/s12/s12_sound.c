@@ -162,7 +162,7 @@ void s12_sound_state_load(const void *src)
 	s_batch[0].nlog = s_batch[1].nlog = 0;
 }
 
-int s12_sound_half_rate; // ReSys12: output at 44.1kHz (the Vita), see c352_render_half
+int s12_sound_half_rate; // ReSys12: output at 44.1kHz, see c352_render_half (off in the libretro core)
 
 int s12_sound_render(S12SoundBatch *b, int16_t *out)
 {

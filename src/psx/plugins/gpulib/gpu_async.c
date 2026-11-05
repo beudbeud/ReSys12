@@ -221,25 +221,10 @@ static int do_add(struct psx_gpu_async *agpu, const void *list, int list_words)
   return ret;
 }
 
-// ReSys12: wait (lock held, wait_mode set by the caller) until the GPU thread clears wait_mode. On the Vita the
-// waiting thread (the emulation thread, CPU0) meanwhile renders the split helper's band if it is pending: CPU1
-// (sound, compiler, helper) runs out of time in heavy scenes (ehrgeiz), while CPU0 sat here for 8-10ms a frame
-#ifdef __vita__
-extern int rs12_split_worker_help(void);
-extern void sceKernelDelayThread(unsigned int usec);
-#endif
+// ReSys12: wait (lock held, wait_mode set by the caller) until the GPU thread clears wait_mode
 static void rs12_agpu_wait(struct psx_gpu_async *agpu)
 {
-#ifdef __vita__
-  while (agpu->wait_mode != waitmode_none) {
-    slock_unlock(agpu->lock);
-    if (!rs12_split_worker_help())
-      sceKernelDelayThread(30);
-    slock_lock(agpu->lock);
-  }
-#else
   scond_wait(agpu->cond_add, agpu->lock);
-#endif
 }
 
 static void do_add_with_wait(struct psx_gpu_async *agpu,

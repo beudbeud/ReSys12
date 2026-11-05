@@ -296,17 +296,12 @@ void h8_ext_write16(uint32_t a, uint16_t d)
 #ifdef RS12_SUB_PROFILE
 static uint64_t s_prof_ns;
 uint64_t s12_sub_profile_ns(void) { return s_prof_ns; }
-#ifdef __vita__
-extern uint64_t sceKernelGetProcessTimeWide(void);
-static uint64_t now_ns(void) { return sceKernelGetProcessTimeWide() * 1000; } // cheaper than clock_gettime here
-#else
 static uint64_t now_ns(void)
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
-#endif
 uint64_t s12_prof_now_ns(void) { return now_ns(); }
 #else
 uint64_t s12_sub_profile_ns(void) { return 0; }
@@ -335,7 +330,7 @@ static void catch_up(void)
 		s12_cdxa_run(now);
 }
 
-// C352 key-on: the wave ROM may still be read in the background (Vita ROM cache, s12_rom.c)
+// C352 key-on: waits for the wave ROM part (s12_rom_wait; everything is read when the load returns)
 static void sub_wave_wait(uint32_t addr, uint32_t len)
 {
 	if (!s12_rom_all_ready)

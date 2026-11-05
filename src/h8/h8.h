@@ -121,7 +121,7 @@ uint64_t h8_total_cycles(void);
 // writes, h8_run calls)
 enum { H8P_INSN, H8P_UPDATE, H8P_IDLE, H8P_EXT_R, H8P_EXT_W, H8P_CHIP_R, H8P_CHIP_W, H8P_RUN, H8P_N };
 extern uint32_t h8_prof[H8P_N];
-// RS12_SUB_PROFILE builds: what the H8 side is doing now, read by a sampler thread (vita main.c, "sampler" file):
+// RS12_SUB_PROFILE builds: what the H8 side is doing now, read by a sampler thread:
 // outside h8_run, h8_run itself, block code, blk_run, interpreter, peripheral update, idle skip, external / on-chip
 // register access, block code calling a block variant / a helper (h8_jit_prof)
 enum { H8PH_OUT, H8PH_RUN, H8PH_CODE, H8PH_BLK, H8PH_INTERP, H8PH_UPDATE, H8PH_IDLE, H8PH_EXT, H8PH_CHIP, H8PH_CALL,

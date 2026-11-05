@@ -4,20 +4,9 @@
 // (blk_exit_*). The common instructions are made here (same steps as their block variants: the icount decrements at
 // the same points, the flags through the same C helpers, on-chip RAM at a fixed address read in place); the others
 // call their block variants (b_* / t_*). icount lives in r5 inside a block and goes back to h8 around every C call.
-// Code goes into the area of rs12_jit_h8_region (Vita: the end of the recompiler's VM block, written only while this
-// thread holds the VM domain; ADR-062) and stays until the ROM changes (h8_set_rom).
+// Code goes into the area of rs12_jit_h8_region and stays until the ROM changes (h8_set_rom).
 #include <stddef.h>
 
-#if defined(__vita__)
-extern void *rs12_jit_h8_region(size_t *size);
-extern void rs12_jit_code_sync(void *p, size_t len);
-extern int rs12_ndrc_code_writable(void);
-static void *jit_area(size_t *size) { return rs12_jit_h8_region(size); }
-static void jit_sync(void *p, size_t len) { rs12_jit_code_sync(p, len); }
-static int jit_writable(void) { return rs12_ndrc_code_writable(); }
-extern int rs12_ndrc_code_executable(void);
-static int jit_executable(void) { return rs12_ndrc_code_executable(); }
-#else
 #include <sys/mman.h>
 static void *jit_area(size_t *size)
 {
@@ -33,7 +22,6 @@ static void *jit_area(size_t *size)
 static void jit_sync(void *p, size_t len) { __builtin___clear_cache((char *)p, (char *)p + len); }
 static int jit_writable(void) { return 1; }
 static int jit_executable(void) { return 1; }
-#endif
 
 int h8_jit_enable = 1;     // 0: blocks run through blk_run (comparisons: RS12_H8JIT=0, noh8jit)
 // which instructions are made here (comparisons: RS12_H8JITNATIVE, 0 = every one calls its block variant): 1 register

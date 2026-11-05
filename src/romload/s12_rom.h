@@ -23,8 +23,8 @@ int s12_game_count(void);
 // msg receives a short reason on failure.
 int s12_rom_load(S12Rom *r, const char *roms_dir, const char *name, char *msg, int msg_len);
 void s12_rom_free(S12Rom *r);
-// ROM cache read (Vita): parts of the graphics bank may still be read in the background after the load returns.
-// Waits until region rg bytes [off, off + len) are there (no-op once everything is read, and off the Vita)
+// Waits until region rg bytes [off, off + len) are there: a no-op, the loaders read everything before returning
+// (kept for the callers of a background cache read)
 void s12_rom_wait(int rg, uint32_t off, uint32_t len);
 extern volatile int s12_rom_all_ready;
 

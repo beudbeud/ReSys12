@@ -42,10 +42,8 @@ static psx_gpu_struct egpu __attribute__((aligned(256)));
 // ReSys12: split rendering (two or three CPU cores). Helper renderer
 // instances (egpu_x[]) parse the same command lists as egpu; each draws its own
 // band of rows (psx_gpu_parse.c split_apply_band / split_check), egpu the top
-// one. On the Vita each helper runs on a worker thread (CPU1, CPU3:
-// shim/rs12_threads_vita.c); elsewhere they run one after the other on the
-// calling thread, which gives the same VRAM contents (used by the PC/ARM
-// harness to check correctness).
+// one. The helpers run one after the other on the calling thread (the PS Vita
+// port ran them on worker threads), which gives the same VRAM contents.
 static psx_gpu_struct *egpu_x[SPLIT_MAX - 1];
 static void *egpu_x_alloc[SPLIT_MAX - 1];
 static int split_n = 2, split_n_req = 2;    // instances (bands)
@@ -64,16 +62,7 @@ volatile uint32_t rs12_gpu_split_mismatch;
 volatile uint32_t rs12_gpu_split_ratio = 128; // top band share of the main scene, for the log
 static u16 split_cut_def[2] = { 128, 256 };   // band boundaries of new draw areas, /256
 
-#ifdef __vita__
-// shim/rs12_threads_vita.c
-int rs12_split_worker_start(int w, void (*job)(int), int cpu);
-void rs12_split_worker_kick(int w);
-int rs12_split_worker_finish(int w, uint64_t *job_us);
-uint64_t rs12_split_now_us(void);
-#define SPLIT_THREADED 1
-#else
 #define SPLIT_THREADED 0
-#endif
 static int split_threaded[SPLIT_MAX - 1], split_no_thread;
 
 // the job of helper w: parse one chunk, write everything out

@@ -322,7 +322,7 @@ int rs12_vram_ymask = 1023; // ReSys12 (gpu.h)
 static uint16_t *vram_ptr_orig = NULL;
 
 #ifndef GPULIB_USE_MMAP
-# if defined(__linux__) || defined(_3DS) || defined(HAVE_LIBNX) || defined(VITA)
+# if defined(__linux__) || defined(_3DS) || defined(HAVE_LIBNX)
 #  define GPULIB_USE_MMAP 1
 # else
 #  define GPULIB_USE_MMAP 0

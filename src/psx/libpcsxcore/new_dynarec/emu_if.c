@@ -22,45 +22,8 @@
 #include "../gte_divider.h"
 #if defined(NDRC_THREAD) && !defined(DRC_DISABLE) && !defined(LIGHTREC)
 #include "../../frontend/pcsxr-threads.h"
-#ifdef VITA
-// ReSys12: no libretro-common; three user cores (CPU0 emulation, CPU1 sound + compiler, CPU2 GPU)
-#include <psp2/kernel/threadmgr.h>
-#include <psp2/kernel/sysmem.h>
-#include <psp2/kernel/processmgr.h>
-static unsigned cpu_features_get_core_amount(void) { return 3; }
-static void retro_sleep(unsigned ms) { sceKernelDelayThread(ms ? ms * 1000 : 50); }
-// The translation cache (a VM domain) is writable only by the thread that opened it. The emulation thread holds it
-// except while the compiler thread compiles a block (busy_addr != ~0): it closes it before handing a block over and
-// opens it again once the compiler is done (the compiler opens and closes it around each block). In between the
-// emulation thread only interprets, and invalidations wait for the compiler first (ari64_thread_sync).
-static int vm_emu_open = 1; // opened at new_dynarec_init on the emulation thread
-// Warm start: between emulated frames the emulation thread may lend the cache to the compiler thread, which then
-// compiles blocks of earlier sessions (rs12_ndrc_warm_*) until it is asked to stop. Meanwhile busy_addr is the
-// block being compiled, as for a normal compile: the emulation thread interprets and never waits for it
-static volatile int s_lent, s_lend_stop;
-static volatile uint32_t rs12_ndrc_last_blk_us; // diagnostics: the compiler thread's last warm block (or scan)
-static void vm_emu_acquire(void)
-{
-	if (!vm_emu_open) {
-		sceKernelOpenVMDomain();
-		vm_emu_open = 1;
-	}
-}
-static void vm_emu_release(void)
-{
-	if (vm_emu_open) {
-		sceKernelCloseVMDomain();
-		vm_emu_open = 0;
-	}
-}
-#define VM_EMU_ACQUIRE() vm_emu_acquire()
-#define VM_EMU_RELEASE() vm_emu_release()
-#define VM_DRC_OPEN() sceKernelOpenVMDomain()
-#define VM_DRC_CLOSE() sceKernelCloseVMDomain()
-#else
 #include "features/features_cpu.h"
 #include "retro_timers.h"
-#endif
 #endif
 #ifndef VM_EMU_ACQUIRE
 #define VM_EMU_ACQUIRE() do { } while (0)
@@ -292,46 +255,6 @@ static void ari64_execute_block(struct psxRegisters *regs, enum blockExecCaller 
 		regs->stop--;
 }
 
-#ifdef VITA
-// ReSys12: code overwritten (DMA) while the compiler thread holds the cache. The emulation thread interprets until
-// the thread is done, so the invalidation can wait for that instead of the emulation waiting for the block (5-12ms
-// each, several a frame in tenkomor's scene loads): the ranges are kept here and invalidated before compiled code
-// runs again (ari64_inv_apply)
-#define RS12_INV_MAX 64
-int rs12_ndrc_inv_defer = 1; // measurements (ux0:data/resys12/noinvdefer = 0): wait for the compiler as upstream
-static u32 s_inv[RS12_INV_MAX][2];
-static int s_inv_n;
-static void ari64_inv_apply(void)
-{
-	void new_dynarec_invalidate_begin(void), new_dynarec_invalidate_end(void);
-	int i;
-	if (!s_inv_n)
-		return;
-	new_dynarec_invalidate_begin();
-	for (i = 0; i < s_inv_n; i++)
-		new_dynarec_invalidate_range(s_inv[i][0], s_inv[i][1]);
-	new_dynarec_invalidate_end();
-	s_inv_n = 0;
-}
-static void ari64_inv_defer(u32 start, u32 end)
-{
-	int i;
-	for (i = 0; i < s_inv_n; i++)
-		if (start <= s_inv[i][1] && s_inv[i][0] <= end) { // overlapping or adjacent: one range
-			if (start < s_inv[i][0]) s_inv[i][0] = start;
-			if (end > s_inv[i][1]) s_inv[i][1] = end;
-			return;
-		}
-	if (s_inv_n == RS12_INV_MAX) { // (full: the last one grows; invalidating more is only slower)
-		if (start < s_inv[s_inv_n - 1][0]) s_inv[s_inv_n - 1][0] = start;
-		if (end > s_inv[s_inv_n - 1][1]) s_inv[s_inv_n - 1][1] = end;
-		return;
-	}
-	s_inv[s_inv_n][0] = start;
-	s_inv[s_inv_n][1] = end;
-	s_inv_n++;
-}
-#endif
 
 static void ari64_clear(u32 addr, u32 size)
 {
@@ -343,34 +266,9 @@ static void ari64_clear(u32 addr, u32 size)
 	    !ari64_thread_check_range(addr, end))
 		return;
 
-#ifdef VITA
-	if (ndrc_g.thread.lock && ndrc_g.thread.busy_addr != ~0u && rs12_ndrc_inv_defer) {
-		ari64_inv_defer(addr, end);
-		return;
-	}
-	// ReSys12: stall log: waiting for the compiler thread, invalidation (code overwritten by DMA)
-	extern uint64_t sceKernelGetProcessTimeWide(void);
-	extern volatile uint64_t rs12_ndrc_tsync_us, rs12_ndrc_inv_us;
-	const uint64_t t0 = sceKernelGetProcessTimeWide();
-	ari64_thread_sync();
-	const uint64_t t1 = sceKernelGetProcessTimeWide();
-	new_dynarec_invalidate_range(addr, end);
-	rs12_ndrc_tsync_us += t1 - t0;
-	rs12_ndrc_inv_us += sceKernelGetProcessTimeWide() - t1;
-#else
 	ari64_thread_sync();
 	new_dynarec_invalidate_range(addr, end);
-#endif
 }
-#ifdef VITA
-volatile uint64_t rs12_ndrc_tsync_us, rs12_ndrc_inv_us;
-// the emulation thread may write the code block now (it holds the VM domain: no compile is running)
-int rs12_ndrc_code_writable(void) { return !ndrc_g.thread.lock || (vm_emu_open && ndrc_g.thread.busy_addr == ~0u); }
-// ReSys12: the emulation thread may run code of the VM block (the H8 code) only while it holds the domain: with the
-// domain closed on every thread (the compiler thread done, the emulation thread still interpreting) the code page
-// faults (prefetch abort at the H8 area seen on the device)
-int rs12_ndrc_code_executable(void) { return !ndrc_g.thread.lock || vm_emu_open; }
-#endif
 
 static void ari64_on_ext_change(int ram_replaced, int other_cpu_emu_exec)
 {
@@ -477,188 +375,6 @@ static R3000Acpu psxMixedCpu = {
 
 #define cacheIsolated(regs) ((regs)->CP0.n.SR & (1u << 16))
 
-#if defined(VITA)
-// ReSys12: warm start. The block starts compiled in earlier sessions of the game (address, register flags) are
-// compiled ahead of time while the emulation thread is between frames, so a
-// scene's first run does not interpret its way through dozens of compiles
-void ndrc_vita_precompile(unsigned int addr, unsigned int regflags);
-static uint32_t *s_warm;    // pairs, loaded at game start
-static int s_warm_n, s_warm_i;
-int rs12_ndrc_warm_delay = 300; // emulated frames before the first lending (the game has loaded its code by then)
-volatile uint32_t rs12_ndrc_warm_done; // blocks compiled ahead (diagnostics)
-
-// compiler thread, holding the lock: compile until asked to stop, for at most ~2ms a frame; during the game's boot
-// screens (the first RS12_WARM_BOOT_LENDS lends) until the next frame asks for the cache back, so earlier sessions'
-// blocks are ready before play (as ReST-V prepares its shaders while loading). busy_addr is the block being compiled,
-// so writes to its source wait for it (ari64_clear)
-#define RS12_WARM_BOOT_LENDS 1200
-static int s_warm_lends;
-// code found from the game's compiled code (ndrc_vita_scan_calls: branch targets out of blocks, called functions)
-// joins the list: a first session then has the code of moves not used yet compiled ahead too. Scans run when the
-// list is done: every second while they find something new, then every 10 s until three find nothing; s_scanned
-// marks the RAM words already listed
-int ndrc_vita_scan_calls(unsigned int *out, int max);
-#define RS12_SCAN_MAX 32768
-static volatile int s_scan_req;
-static int s_scan_idle, s_scan_empty;
-static uint8_t s_scanned[0x400000 / 4 / 8];
-volatile uint32_t rs12_ndrc_scan_found; // entries added by scans (diagnostics)
-int rs12_ndrc_scan_off; // measurements (ux0:data/resys12/noscan): no scans
-static void ari64_warm_scan(void)
-{
-	static uint32_t buf[RS12_SCAN_MAX * 2];
-	const int n = ndrc_vita_scan_calls(buf, RS12_SCAN_MAX);
-	int add = 0, i;
-	for (i = 0; i < n; i++) { // new ones to the front of buf
-		const uint32_t w = (buf[i * 2] & 0x3fffff) >> 2;
-		if (s_scanned[w >> 3] & (1u << (w & 7)))
-			continue;
-		s_scanned[w >> 3] |= 1u << (w & 7);
-		buf[add * 2] = buf[i * 2];
-		buf[add * 2 + 1] = buf[i * 2 + 1];
-		add++;
-	}
-	s_scan_empty = add ? 0 : s_scan_empty + 1;
-	if (!add)
-		return;
-	uint32_t *nw = realloc(s_warm, (size_t)(s_warm_n + add) * 8);
-	if (!nw)
-		return;
-	memcpy(nw + s_warm_n * 2, buf, (size_t)add * 8);
-	s_warm = nw;
-	s_warm_n += add;
-	rs12_ndrc_scan_found += add;
-}
-
-static void ari64_warm_compile(void)
-{
-	const uint64_t ts = sceKernelGetProcessTimeWide();
-	const uint64_t t0 = sceKernelGetProcessTimeWide();
-	const uint64_t budget = s_warm_lends < RS12_WARM_BOOT_LENDS ? 14000 : 2000;
-	if (s_scan_req) {
-		s_scan_req = 0;
-		ari64_warm_scan();
-		rs12_ndrc_last_blk_us = (uint32_t)(sceKernelGetProcessTimeWide() - ts); // (the scan)
-	}
-	sceKernelOpenVMDomain();
-	ndrc_g.thread.in_compiler = 1;
-	while (!s_lend_stop && s_warm_i < s_warm_n && sceKernelGetProcessTimeWide() - t0 < budget) {
-		ndrc_g.thread.busy_addr = s_warm[s_warm_i * 2];
-		__sync_synchronize();
-		const uint64_t tb = sceKernelGetProcessTimeWide();
-		ndrc_vita_precompile(s_warm[s_warm_i * 2], s_warm[s_warm_i * 2 + 1]);
-		rs12_ndrc_last_blk_us = (uint32_t)(sceKernelGetProcessTimeWide() - tb);
-		s_warm_i++;
-		rs12_ndrc_warm_done++;
-	}
-	ndrc_g.thread.in_compiler = 0;
-	sceKernelCloseVMDomain();
-}
-
-// emulation thread, end of an emulated frame: lend the cache while the frontend presents and waits
-static void ari64_warm_lend(struct psxRegisters *regs)
-{
-	if (rs12_ndrc_warm_delay > 0) {
-		rs12_ndrc_warm_delay--;
-		return;
-	}
-	int scan = 0;
-	if (s_warm_i >= s_warm_n) {
-		// the list is done: look for more function entries every 10 s (until three scans find nothing new)
-		if (!rs12_ndrc_scan_off && s_scan_empty < 3 && ++s_scan_idle >= (s_scan_empty ? 600 : 60)) {
-			s_scan_idle = 0;
-			scan = 1;
-		}
-		else {
-			// a game that loads code over code drops blocks compiled ahead: go over the list again (blocks still
-			// there are only looked up), at most every 2 s and only after blocks were invalidated
-			extern volatile uint32_t rs12_ndrc_invalidated;
-			static uint32_t inv_seen;
-			static int idle;
-			if (!s_warm_n || ++idle < 120 || rs12_ndrc_invalidated == inv_seen)
-				return;
-			inv_seen = rs12_ndrc_invalidated;
-			idle = 0;
-			s_warm_i = 0;
-		}
-	}
-	if (ndrc_g.thread.busy_addr != ~0u || regs->cpuInRecursion || !vm_emu_open)
-		return;
-	s_scan_req = scan;
-	sceKernelCloseVMDomain();
-	vm_emu_open = 0;
-	s_warm_lends++;
-	slock_lock(ndrc_g.thread.lock);
-	s_lend_stop = 0;
-	s_lent = 1;
-	// (a scan alone: the boot ROM address, which no store reaches, so no write waits for it)
-	ndrc_g.thread.busy_addr = s_warm_i < s_warm_n ? s_warm[s_warm_i * 2] : 0x1fc00000u;
-	slock_unlock(ndrc_g.thread.lock);
-	scond_signal(ndrc_g.thread.cond);
-}
-
-// emulation thread, start of an emulated frame: ask for the cache back (until the compiler has finished its
-// block, busy_addr stays set and the emulation thread interprets)
-static void ari64_warm_stop(void)
-{
-	if (s_lent)
-		s_lend_stop = 1;
-}
-
-// before the game runs: the block list of earlier sessions
-void rs12_ndrc_warm_set(const uint32_t *pairs, int n)
-{
-	free(s_warm);
-	s_warm = NULL;
-	s_warm_n = s_warm_i = 0;
-	s_warm_lends = 0; // (a new game in the same process: its boot screens again get the long compile slices)
-	s_scan_idle = 599; // (the first scan at the first lending)
-	s_scan_empty = 0;
-	s_scan_req = 0;
-	memset(s_scanned, 0, sizeof(s_scanned));
-	if (n <= 0 || !(s_warm = malloc((size_t)n * 8)))
-		return;
-	memcpy(s_warm, pairs, (size_t)n * 8);
-	s_warm_n = n;
-}
-
-// a save state was loaded: no boot screens to compile behind, so only the short slices from now on (the long ones
-// made the emulation interpret its way through a fight loaded from a state)
-void rs12_ndrc_warm_boot_end(void)
-{
-	s_warm_lends = RS12_WARM_BOOT_LENDS;
-}
-
-static int warm_cmp(const void *a, const void *b)
-{
-	const uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
-	return x < y ? -1 : x > y;
-}
-
-// emulation thread: the blocks compiled now plus those of earlier sessions, sorted, one entry per address;
-// returns the pairs written to out
-int rs12_ndrc_warm_collect(uint32_t *out, int max)
-{
-	int ndrc_vita_collect_blocks(unsigned int *out, int max);
-	ari64_thread_sync();
-	int n = ndrc_vita_collect_blocks(out, max);
-	for (int i = 0; i < s_warm_n && n < max; i++) {
-		out[n * 2] = s_warm[i * 2];
-		out[n * 2 + 1] = s_warm[i * 2 + 1];
-		n++;
-	}
-	qsort(out, n, 8, warm_cmp);
-	int d = 0;
-	for (int i = 0; i < n; i++) {
-		if (d && out[(d - 1) * 2] == out[i * 2])
-			continue;
-		out[d * 2] = out[i * 2];
-		out[d * 2 + 1] = out[i * 2 + 1];
-		d++;
-	}
-	return d;
-}
-#endif
 
 static noinline void ari64_execute_threaded_slow(struct psxRegisters *regs,
 	enum blockExecCaller block_caller)
@@ -717,10 +433,6 @@ static void ari64_execute_threaded_once(struct psxRegisters *regs,
 
 	if (likely(ndrc_g.thread.busy_addr == ~0u)) {
 		VM_EMU_ACQUIRE(); // compiled code may link (patch) branches
-#ifdef VITA
-		if (unlikely(s_inv_n))
-			ari64_inv_apply(); // (code overwritten while the compiler thread had the cache)
-#endif
 		target = ndrc_get_addr_ht_param(hash_table, regs->pc,
 				ndrc_cm_no_compile);
 		if (target) {
@@ -734,9 +446,6 @@ static void ari64_execute_threaded_once(struct psxRegisters *regs,
 
 static void ari64_execute_threaded(struct psxRegisters *regs)
 {
-#if defined(VITA)
-	ari64_warm_stop();
-#endif
 	schedule_timeslice(regs);
 	while (!regs->stop)
 	{
@@ -745,9 +454,6 @@ static void ari64_execute_threaded(struct psxRegisters *regs)
 		if ((s32)(regs->cycle - regs->next_interupt) >= 0)
 			schedule_timeslice(regs);
 	}
-#if defined(VITA)
-	ari64_warm_lend(regs);
-#endif
 }
 
 static void ari64_execute_threaded_block(struct psxRegisters *regs,
@@ -772,17 +478,8 @@ static void ari64_thread_sync(void)
 {
 	if (!ndrc_g.thread.lock || ndrc_g.thread.busy_addr == ~0u) {
 		VM_EMU_ACQUIRE(); // callers go on to write the cache (invalidation)
-#ifdef VITA
-		ari64_inv_apply();
-#endif
 		return;
 	}
-#if defined(VITA)
-	const int lent = s_lent, scanning = s_scan_req;
-	const u32 busy = ndrc_g.thread.busy_addr;
-	const uint64_t t0 = sceKernelGetProcessTimeWide();
-	ari64_warm_stop();
-#endif
 	for (;;) {
 		slock_lock(ndrc_g.thread.lock);
 		slock_unlock(ndrc_g.thread.lock);
@@ -790,20 +487,7 @@ static void ari64_thread_sync(void)
 			break;
 		retro_sleep(0);
 	}
-#if defined(VITA)
-	{ // ReSys12 (diagnostics): long waits for the compiler thread
-		const uint64_t w = sceKernelGetProcessTimeWide() - t0;
-		if (w > 5000) {
-			extern void rs12_log_printf(const char *fmt, ...);
-			rs12_log_printf("thread wait %.1fms: lent %d scan %d busy %08x warm %d/%d last block %.1fms", w / 1000.0, lent,
-				scanning, busy, s_warm_i, s_warm_n, rs12_ndrc_last_blk_us / 1000.0);
-		}
-	}
-#endif
 	VM_EMU_ACQUIRE();
-#ifdef VITA
-	ari64_inv_apply();
-#endif
 }
 
 static int ari64_thread_check_range(unsigned int start, unsigned int end)
@@ -830,10 +514,6 @@ static STRHEAD_RET_TYPE ari64_compile_thread(void *unused)
 		*(void **)((char *)dynarec_local + LO_hash_table_ptr);
 	void *target;
 	u32 addr;
-#ifdef RS12_NDRC_PROFILE
-	extern volatile uintptr_t rs12_ndrc_ct_sp;
-	rs12_ndrc_ct_sp = (uintptr_t)&addr;
-#endif
 
 	slock_lock(ndrc_g.thread.lock);
 	while (!ndrc_g.thread.exit)
@@ -842,16 +522,6 @@ static STRHEAD_RET_TYPE ari64_compile_thread(void *unused)
 		if (addr == ~0u)
 			scond_wait(ndrc_g.thread.cond, ndrc_g.thread.lock);
 		addr = *(volatile unsigned int *)&ndrc_g.thread.busy_addr;
-#if defined(VITA)
-		if (s_lent) {
-			if (!ndrc_g.thread.exit)
-				ari64_warm_compile();
-			s_lent = 0;
-			__sync_synchronize();
-			ndrc_g.thread.busy_addr = ~0u;
-			continue;
-		}
-#endif
 		if (addr == ~0u || ndrc_g.thread.exit)
 			continue;
 

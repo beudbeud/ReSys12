@@ -9,10 +9,7 @@ nvram/
 # --- build output ---
 build/
 build-*/
-*.vpk
 *.elf
-*.velf
-*.self
 *.o
 *.a
 *.obj
@@ -20,7 +17,6 @@ build-*/
 
 # --- debug output ---
 artifacts/
-*.psp2dmp
 
 # --- editor / OS ---
 .vscode/
@@ -30,9 +26,6 @@ artifacts/
 Thumbs.db
 
 
-# editable art sources (tools/make_app_art.py)
-art_psd/
-*.psd
 *.so
 libretro/obj/
 libretro/tests/out/

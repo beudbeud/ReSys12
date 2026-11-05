@@ -32,7 +32,7 @@ static retro_audio_sample_batch_t audio_batch_cb;
 static retro_input_poll_t input_poll_cb;
 static retro_input_state_t input_state_cb;
 
-// gpu_async.c statistics the Vita frontend shows (VRAM read rectangles)
+// gpu_async.c statistics (VRAM read rectangles); this frontend does not show them
 volatile int rs12_rw_hit[5], rs12_rw_max[11], rs12_rw_full[6];
 
 static S12Rom s_rom;

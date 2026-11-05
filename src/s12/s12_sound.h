@@ -2,7 +2,7 @@
 // The H8 side (emulation thread) only logs register writes with their sample time and answers register reads from a
 // mirror (written values) and a snapshot of the voice flags taken when the previous batch finished. A batch is then
 // rendered on any thread (s12_sound_render): the output depends only on the batch, so it is deterministic whether
-// it runs synchronously (PC harness) or one frame behind on the sound core (Vita).
+// it runs synchronously (libretro core) or one frame behind on another thread.
 #ifndef S12_SOUND_H
 #define S12_SOUND_H
 

@@ -1,5 +1,5 @@
 // ReSys12: pthread implementation of pcsx_rearmed's small thread API (frontend/pcsxr-threads.h) for the libretro
-// build; the Vita build has shim/rs12_threads_vita.c. GPL-2.0-or-later.
+// build. GPL-2.0-or-later.
 #include <pthread.h>
 #include <stdlib.h>
 #include <unistd.h>

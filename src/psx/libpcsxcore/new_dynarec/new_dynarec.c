@@ -126,14 +126,7 @@ extern uintptr_t mini_ht[32][2];
 #define BLOCK_INFO_IN_TC 1
 #endif
 
-#ifdef VITA
-// apparently Vita has a 16MB limit, so either we cut tc in half,
-// or use this hack (it's a hack because tc size was designed to be power-of-2)
-// ReSys12: 1MB more for the H8 code (src/h8, rs12_jit_h8_region: the end of the same VM block; ADR-062)
-#define TC_REDUCE_BYTES ((1 << 20) + 4096)
-#else
 #define TC_REDUCE_BYTES 0
-#endif
 
 struct ndrc_globals ndrc_g;
 
@@ -673,25 +666,11 @@ static noinline void perf_dump_wrap_(void)
 #define perf_dump_wrap()
 #endif
 
-#ifdef VITA
-#include <psp2/kernel/sysmem.h>
-static int sceBlock;
-// note: this interacts with RetroArch's Vita bootstrap code: bootstrap/vita/sbrk.c
-extern int getVMBlock();
-int _newlib_vm_size_user = sizeof(*ndrc);
-#endif
 
 static void mprotect_w_x(void *start, void *end, int is_x)
 {
 #ifdef NO_WRITE_EXEC
-  #if defined(VITA)
-  // *Open* enables write on all memory that was
-  // allocated by sceKernelAllocMemBlockForVM()?
-  if (is_x)
-    sceKernelCloseVMDomain();
-  else
-    sceKernelOpenVMDomain();
-  #elif defined(HAVE_LIBNX)
+#if defined(HAVE_LIBNX)
   Result rc;
   // check to avoid the full flush in jitTransitionToExecutable()
   if (g_jit.type != JitType_CodeMemory) {
@@ -702,9 +681,9 @@ static void mprotect_w_x(void *start, void *end, int is_x)
     if (R_FAILED(rc))
       ;//SysPrintf("jitTransition %d %08x\n", is_x, rc);
   }
-  #elif defined(TC_WRITE_OFFSET)
+#elif defined(TC_WRITE_OFFSET)
   // separated rx and rw areas are always available
-  #else
+#else
   u_long mstart = (u_long)start & ~4095ul;
   u_long mend = (u_long)end;
   if (mprotect((void *)mstart, mend - mstart,
@@ -722,25 +701,6 @@ void new_dyna_clear_cache(void *start, void *end)
   msync(start, len, MS_SYNC | MS_CACHE_ONLY | MS_INVALIDATE_ICACHE);
   #elif defined(__MACH__)
   sys_cache_control(kCacheFunctionPrepareForExecution, start, len);
-  #elif defined(VITA)
-  { // ReSys12: time the cache sync (stall log)
-    extern volatile uint64_t rs12_ndrc_sync_us;
-    extern volatile uint32_t rs12_ndrc_syncs;
-    extern uint64_t sceKernelGetProcessTimeWide(void);
-    const uint64_t t0 = sceKernelGetProcessTimeWide();
-    sceKernelSyncVMDomain(sceBlock, start, len);
-    rs12_ndrc_sync_us += sceKernelGetProcessTimeWide() - t0;
-    rs12_ndrc_syncs++;
-#ifdef RS12_NDRC_PROFILE
-    if (len > 65536) {
-      extern void rs12_log_printf(const char *fmt, ...);
-      rs12_log_printf("syncvm big %u bytes from %x (+%x) %x, %.1fms", (u_int)len,
-        (u_int)((uintptr_t)__builtin_return_address(0) - (uintptr_t)new_dyna_clear_cache),
-        (u_int)((u_char *)start - ndrc->translation_cache), (u_int)(uintptr_t)end,
-        (sceKernelGetProcessTimeWide() - t0) / 1000.0);
-    }
-#endif
-  }
   #elif defined(_3DS)
   // tuned for old3ds' 16k:16k cache (in it's mostly clean state...)
   if ((char *)end - (char *)start <= 2*1024)
@@ -807,9 +767,6 @@ static void *start_tcache_write_reserve(u_int max_space)
     out = ndrc->translation_cache;
     end = out + max_space;
     perf_dump_wrap();
-#ifdef VITA
-    { extern volatile uint32_t rs12_ndrc_wraps; rs12_ndrc_wraps++; }
-#endif
   }
   // we do a bit more than requested to avoid large jump and lots of
   // expirations the moment we wrap
@@ -862,24 +819,11 @@ static void do_clear_cache(void)
 // also takes care of w^x mappings when patching code
 static u_int needs_clear_cache[1<<(TARGET_SIZE_2-17)];
 
-#ifdef VITA
-// ReSys12: sceKernelSyncVMDomain costs ~6us a call plus ~10us per KB (measured), and an unlink patches one
-// instruction, so the touched 32-byte cache lines are synced instead of their 4KB pages (pages when there are many)
-#define RS12_CLR_LINES 2048
-static uintptr_t rs12_clr_line[RS12_CLR_LINES];
-static u_int rs12_clr_n;
-#endif
 
 static void mark_clear_cache(void *target)
 {
   uintptr_t offset = (u_char *)target - ndrc->translation_cache;
   u_int mask = 1u << ((offset >> 12) & 31);
-#ifdef VITA
-  if (rs12_clr_n < RS12_CLR_LINES && !(needs_clear_cache[offset >> 17] & mask)) {
-    rs12_clr_line[rs12_clr_n++] = (uintptr_t)target & ~(uintptr_t)31;
-    return;
-  }
-#endif
   if (!(needs_clear_cache[offset >> 17] & mask)) {
     char *start = (char *)NDRC_WRITE_OFFSET((uintptr_t)target & ~4095l);
     start_tcache_write(start, start + 4095);
@@ -889,31 +833,10 @@ static void mark_clear_cache(void *target)
 
 // Clearing the cache is rather slow on ARM Linux, so mark the areas
 // that need to be cleared, and then only clear these areas once.
-#ifdef VITA
-static int rs12_clr_cmp(const void *a, const void *b)
-{
-  const uintptr_t x = *(const uintptr_t *)a, y = *(const uintptr_t *)b;
-  return x < y ? -1 : x > y;
-}
-#endif
 
 static void do_clear_cache(void)
 {
   int i, j;
-#ifdef VITA
-  if (rs12_clr_n) {
-    u_int k, n = rs12_clr_n;
-    qsort(rs12_clr_line, n, sizeof(rs12_clr_line[0]), rs12_clr_cmp);
-    for (k = 0; k < n; ) {
-      uintptr_t start = rs12_clr_line[k], end = start + 32;
-      // lines up to 512 bytes apart cost less in one call than in two
-      for (k++; k < n && rs12_clr_line[k] <= end + 512; k++)
-        end = rs12_clr_line[k] + 32;
-      end_tcache_write(NDRC_WRITE_OFFSET((void *)start), NDRC_WRITE_OFFSET((void *)end), 1);
-    }
-    rs12_clr_n = 0;
-  }
-#endif
   for (i = 0; i < (1<<(TARGET_SIZE_2-17)); i++)
   {
     u_int bitmap = needs_clear_cache[i];
@@ -1192,21 +1115,7 @@ static void noinline *get_addr(struct ht_entry *ht, const u_int vaddr,
   if (set_smrv_regs)
     memcpy(ndrc_smrv_regs, psxRegs.GPR.r, sizeof(ndrc_smrv_regs));
 
-#ifdef VITA
-  // ReSys12: compile time, for the frame stall log (the first run of a scene's code compiles it)
-  extern volatile uint64_t rs12_ndrc_compile_us;
-  extern volatile uint32_t rs12_ndrc_blocks;
-  extern uint64_t sceKernelGetProcessTimeWide(void);
-  extern volatile uint64_t rs12_ndrc_cpu_us;
-  extern uint64_t rs12_thread_run_us(void);
-  const uint64_t rs12_t0 = sceKernelGetProcessTimeWide(), rs12_c0 = rs12_thread_run_us();
   int r = new_recompile_block(vaddr);
-  rs12_ndrc_compile_us += sceKernelGetProcessTimeWide() - rs12_t0;
-  rs12_ndrc_cpu_us += rs12_thread_run_us() - rs12_c0; // the thread's own run time (the rest is preemption)
-  rs12_ndrc_blocks++;
-#else
-  int r = new_recompile_block(vaddr);
-#endif
   if (likely(r == 0))
     return ndrc_get_addr_ht(vaddr, ht);
 
@@ -1886,19 +1795,15 @@ static void unlink_jumps_vaddr_range(u_int start, u_int end)
   }
 }
 
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
 volatile uint32_t rs12_ndrc_invalidated; // ReSys12: blocks invalidated (stall log)
-#endif
-#ifdef VITA
-volatile uint32_t rs12_ndrc_wraps;       // ReSys12: translation cache wrapped around (old blocks expire)
-uint32_t rs12_ndrc_tc_used(void) { return (uint32_t)(out - ndrc->translation_cache); } // write position
 #endif
 
 static void invalidate_block(struct block_info *block)
 {
   u_int i;
 
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
   rs12_ndrc_invalidated++;
 #endif
   block->is_dirty = 1;
@@ -1907,7 +1812,7 @@ static void invalidate_block(struct block_info *block)
     hash_table_remove(block->jump_in[i].vaddr);
 }
 
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
 // ReSys12: Clear() of a range (DMA, interpreter stores) leaves a block whose code bytes are still the ones it was
 // compiled from (as try_restore_block checks): tenkomor loads the same code overlays again and again, and each load
 // unlinked, re-synced and later restored or recompiled every block in them
@@ -1915,24 +1820,12 @@ int rs12_ndrc_keep_same = 1; // measurements (ux0:data/resys12/nokeepsame = 0)
 volatile uint32_t rs12_ndrc_kept; // blocks left valid (diagnostics)
 static int rs12_inv_keep;        // set by new_dynarec_invalidate_range only
 #endif
-#ifdef VITA
-static int rs12_inv_batch, rs12_inv_batch_hit;
-// ReSys12: invalidate several ranges with one cache sync for all the links they undo (the deferred ranges, emu_if.c)
-void new_dynarec_invalidate_begin(void) { rs12_inv_batch = 1; rs12_inv_batch_hit = 0; }
-void new_dynarec_invalidate_end(void)
-{
-  rs12_inv_batch = 0;
-  if (rs12_inv_batch_hit)
-    do_clear_cache();
-  rs12_inv_batch_hit = 0;
-}
-#endif
 
 static int invalidate_range(u_int start, u_int end,
   u32 *inv_start_ret, u32 *inv_end_ret)
 {
   struct block_info *last_block = NULL;
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
   int kept = 0;
 #endif
   u_int start_page = get_page_prev(start);
@@ -1967,7 +1860,7 @@ static int invalidate_range(u_int start, u_int end,
       }
       if (!block->source) // "hack" block - leave it alone
         continue;
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
       if (rs12_inv_keep && block->copy && !memcmp(block->source, block->copy, block->len)) {
         kept++;
         rs12_ndrc_kept++;
@@ -1991,16 +1884,11 @@ static int invalidate_range(u_int start, u_int end,
     }
   }
   if (hit) {
-#ifdef VITA
-    if (rs12_inv_batch) // (several ranges in a row: one sorted, merged sync at the end, new_dynarec_invalidate_end)
-      rs12_inv_batch_hit = 1;
-    else
-#endif
     do_clear_cache();
     mini_ht_clear();
   }
 
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
   if (!kept) // (a block left valid: the page still has code)
 #endif
   if (inv_start <= (start_m & ~0xfff) && inv_end >= (start_m | 0xfff))
@@ -2014,7 +1902,7 @@ static int invalidate_range(u_int start, u_int end,
 
 void new_dynarec_invalidate_range(unsigned int start, unsigned int end)
 {
-#if defined(VITA) || defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
   rs12_inv_keep = rs12_ndrc_keep_same;
   invalidate_range(start, end, NULL, NULL);
   rs12_inv_keep = 0;
@@ -6896,33 +6784,10 @@ void new_dynarec_init(void)
     (int)sizeof(*ndrc), align + 1);
 
 #ifdef BASE_ADDR_DYNAMIC
-  #ifdef VITA
-  sceBlock = getVMBlock(); //sceKernelAllocMemBlockForVM("code", sizeof(*ndrc));
-  if (sceBlock <= 0)
-    SysPrintf("getVMBlock failed: %x\n", sceBlock);
-  int ret = sceKernelGetMemBlockBase(sceBlock, (void **)&ndrc);
-  if (ret)
-    SysPrintf("sceKernelGetMemBlockBase: %x\n", ret);
-  ret = sceKernelOpenVMDomain();
-  if (ret)
-    SysPrintf("sceKernelOpenVMDomain: %x\n", ret);
-#ifdef RS12_NDRC_PROFILE
-  { // ReSys12 measurement: sceKernelSyncVMDomain cost by size
-    extern uint64_t sceKernelGetProcessTimeWide(void);
-    static const u_int sz[] = { 4, 32, 256, 1024, 4096, 16384, 65536, 1 << 20 };
-    for (int k = 0; k < 8; k++) {
-      const uint64_t t0 = sceKernelGetProcessTimeWide();
-      for (int n = 0; n < 16; n++)
-        sceKernelSyncVMDomain(sceBlock, (char *)ndrc + n * 4096 * 4, sz[k]);
-      extern void rs12_log_printf(const char *fmt, ...);
-      rs12_log_printf("syncvm %u bytes: %.1f us", sz[k], (sceKernelGetProcessTimeWide() - t0) / 16.0);
-    }
-  }
-#endif
-  #elif defined(_MSC_VER)
+#if defined(_MSC_VER)
   ndrc = VirtualAlloc(NULL, sizeof(*ndrc), MEM_COMMIT | MEM_RESERVE,
     PAGE_EXECUTE_READWRITE);
-  #elif defined(HAVE_LIBNX)
+#elif defined(HAVE_LIBNX)
   Result rc = jitCreate(&g_jit, sizeof(*ndrc));
   if (R_FAILED(rc))
     SysPrintf("jitCreate failed: %08x\n", rc);
@@ -6931,7 +6796,7 @@ void new_dynarec_init(void)
   ndrc = g_jit.rx_addr;
   ndrc_write_ofs = (char *)g_jit.rw_addr - (char *)ndrc;
   memset(NDRC_WRITE_OFFSET(&ndrc->tramp), 0, sizeof(ndrc->tramp));
-  #else
+#else
   uintptr_t desired_addr = 0;
   int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
@@ -6995,14 +6860,10 @@ void new_dynarec_cleanup(void)
 {
   int n;
 #ifdef BASE_ADDR_DYNAMIC
-  #ifdef VITA
-  // sceBlock is managed by retroarch's bootstrap code
-  //sceKernelFreeMemBlock(sceBlock);
-  //sceBlock = -1;
-  #elif defined(HAVE_LIBNX)
+#if defined(HAVE_LIBNX)
   jitClose(&g_jit);
   ndrc = NULL;
-  #else
+#else
   if (munmap(ndrc, sizeof(*ndrc)) < 0)
     SysPrintf("munmap() failed\n");
   ndrc = NULL;
@@ -7117,94 +6978,6 @@ int new_dynarec_save_blocks(void *save, int size)
   return o * sizeof(sblocks[0]);
 }
 
-#ifdef VITA
-// ReSys12: compile one block saved by new_dynarec_save_blocks() in an earlier session ahead of time (warm start,
-// emu_if.c). The caller holds the translation cache; RAM holds whatever is there now, and a later write to the
-// block's source invalidates it as usual
-void ndrc_vita_precompile(u_int addr, u_int regflags)
-{
-  u_int f;
-  int i;
-  for (i = 1; i < 32; i++)
-    ndrc_smrv_regs[i] = 0x80000000;
-  for (f = regflags, i = 0; f; f >>= 1, i++) {
-    if (f & 1)
-      ndrc_smrv_regs[i] = 0x1f800000;
-  }
-  ndrc_get_addr_ht_param(hash_table, addr, ndrc_cm_compile_offline);
-}
-
-// ReSys12: every clean block start with its register flags, as address/flags pairs (new_dynarec_save_blocks()
-// keeps only one start per function, so the others were compiled on first use even after a warm start)
-int ndrc_vita_collect_blocks(u_int *out, int max)
-{
-  const struct block_info *block;
-  int p, n = 0;
-  for (p = 0; p < ARRAY_SIZE(blocks); p++) {
-    for (block = blocks[p]; block != NULL && n < max; block = block->next_by_vaddr) {
-      if (block->is_dirty || (block->reg_sv_flags & 1) || !block->source)
-        continue;
-      out[n * 2] = block->start;
-      out[n * 2 + 1] = block->reg_sv_flags;
-      n++;
-    }
-  }
-  return n;
-}
-
-// ReSys12: code the game has not run yet, for compiling ahead (a first session otherwise compiled each new move's
-// code when it first ran, 40-80 ms of interpreting each time). The branch targets out of compiled blocks (their
-// links), and the functions named by JALs in the RAM pages that hold compiled blocks, taken if they look like one
-// (a stack frame set up first, or right after a return). Repeated scans follow the code from block to block.
-// Address/flags pairs (flags 0) into out; returns the count
-int ndrc_vita_scan_calls(u_int *out, int max)
-{
-  static u_char code_page[RAM_SIZE >> 12];
-  const u_int *ram = (const u_int *)psxRegs.ptrs.psxM;
-  const struct block_info *block;
-  int p, n = 0;
-  u_int a;
-  memset(code_page, 0, sizeof(code_page));
-  for (p = 0; p < ARRAY_SIZE(blocks); p++)
-    for (block = blocks[p]; block != NULL; block = block->next_by_vaddr) {
-      a = block->start;
-      if (a < 0x00800000u || (0x80000000u <= a && a < 0x80800000u) || (0xa0000000u <= a && a < 0xa0800000u))
-        code_page[(a & (RAM_SIZE - 1)) >> 12] = 1;
-    }
-  for (p = 0; p < ARRAY_SIZE(jumps) && n < max; p++) {
-    const struct jump_info *ji = jumps[p];
-    int k;
-    for (k = 0; ji && k < ji->count && n < max; k++) {
-      a = ji->e[k].target_vaddr;
-      if (!(0x80000000u <= a && a < 0x80000000u + RAM_SIZE))
-        continue;
-      out[n * 2] = a;
-      out[n * 2 + 1] = 0;
-      n++;
-    }
-  }
-  for (p = 0; p < (int)sizeof(code_page) && n < max; p++) {
-    if (!code_page[p])
-      continue;
-    for (a = (u_int)p << 10; a < ((u_int)p + 1) << 10 && n < max; a++) {
-      const u_int w = ram[a];
-      if ((w >> 26) != 3) // JAL
-        continue;
-      const u_int t = 0x80000000u | ((w & 0x3ffffff) << 2);
-      const u_int ti = (t & (RAM_SIZE - 1)) >> 2;
-      if (t >= 0x80000000u + RAM_SIZE || ti < 2)
-        continue;
-      const u_int first = ram[ti];
-      if ((first & 0xffff8000u) != 0x27bd8000u /* addiu sp, sp, -n */ && ram[ti - 2] != 0x03e00008u /* jr ra */)
-        continue;
-      out[n * 2] = t;
-      out[n * 2 + 1] = 0;
-      n++;
-    }
-  }
-  return n;
-}
-#endif
 
 void new_dynarec_load_blocks(const void *save, int size)
 {
@@ -9946,48 +9719,8 @@ static void block_info_finish(const struct compile_state *st,
   perf_dump_write(st, beginning, end);
 }
 
-#ifdef RS12_NDRC_PROFILE
-// ReSys12 (measurement builds, -finstrument-functions on this file): the function the compiler thread is in, for
-// the sampler thread. Only frames on the compiler thread's stack (below rs12_ndrc_ct_sp) count
-volatile uintptr_t rs12_ndrc_ct_sp;
-#define RS12_FN_MAX 32
-volatile void *rs12_ndrc_fn[RS12_FN_MAX];
-volatile int rs12_ndrc_fn_depth;
-static inline int __attribute__((no_instrument_function)) rs12_on_ct(void)
-{
-  const uintptr_t sp = (uintptr_t)__builtin_frame_address(0);
-  return rs12_ndrc_ct_sp && sp <= rs12_ndrc_ct_sp && sp > rs12_ndrc_ct_sp - 0x20000; // 128KB thread stacks (rs12_threads_vita.c)
-}
-void __attribute__((no_instrument_function)) __cyg_profile_func_enter(void *fn, void *site)
-{
-  (void)site;
-  if (!rs12_on_ct())
-    return;
-  const int d = rs12_ndrc_fn_depth;
-  if (d < RS12_FN_MAX)
-    rs12_ndrc_fn[d] = fn;
-  rs12_ndrc_fn_depth = d + 1;
-}
-void __attribute__((no_instrument_function)) __cyg_profile_func_exit(void *fn, void *site)
-{
-  (void)fn;
-  (void)site;
-  if (rs12_on_ct() && rs12_ndrc_fn_depth > 0)
-    rs12_ndrc_fn_depth--;
-}
-#endif
 
-#ifdef VITA
-// ReSys12: time per compile pass (stall log): [1] disassemble ... [8] assembly, [9] linker and finish
-extern uint64_t sceKernelGetProcessTimeWide(void);
-volatile uint64_t rs12_ndrc_pass_us[10];
-volatile uint32_t rs12_ndrc_insns; // MIPS instructions compiled
-// compiles per block start (stats for the log: code compiled again and again shows up here). Reset by the reader
-uint32_t rs12_ndrc_hot[256][3]; // start, compiles, instructions
-uint32_t rs12_ndrc_big[8][2], rs12_ndrc_big_n; // last blocks of 400+ instructions: start, length
-static uint64_t rs12_pass_t;
-#define RS12_PASS(n) do { const uint64_t t_ = sceKernelGetProcessTimeWide(); rs12_ndrc_pass_us[n] += t_ - rs12_pass_t;   rs12_pass_t = t_; } while (0)
-#elif defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
 // ReSys12 (harness): time per compile pass (qemu: only the shares mean anything), instructions compiled, and a hash of
 // (block start, instructions, code bytes emitted) per block: compiler changes that must not change the output keep it
 #include <time.h>
@@ -10144,38 +9877,17 @@ static int noinline new_recompile_block(u_int addr)
 
   /* Pass 1 disassembly */
 
-#ifdef VITA
-  rs12_pass_t = sceKernelGetProcessTimeWide();
-#elif defined(RS12_HARNESS)
+#if defined(RS12_HARNESS)
   rs12_pass_t = rs12_now_ns();
 #endif
   pass1a_disassemble(&st, pagelimit);
   pass1b_bt(&st);
   RS12_PASS(1);
-#if defined(RS12_HARNESS) && !defined(VITA)
+#if defined(RS12_HARNESS)
   rs12_ndrc_insns += st.slen;
 #endif
-#ifdef VITA
-  rs12_ndrc_insns += st.slen;
-  {
-    uint32_t *h = rs12_ndrc_hot[(st.start >> 2) & 255];
-    if (h[0] != st.start) {
-      h[0] = st.start;
-      h[1] = 0;
-      h[2] = 0;
-    }
-    h[1]++;
-    h[2] += st.slen;
-    if (st.slen >= 400) {
-      uint32_t *b = rs12_ndrc_big[rs12_ndrc_big_n++ & 7];
-      b[0] = st.start;
-      b[1] = st.slen;
-    }
-  }
-#else
   if (rs12_ndrc_log) // (harness RS12_NDRC_LOG: every compiled block, to find code compiled again and again)
     fprintf(stderr, "ndrc compile %08x len %d cycle %u\n", st.start, st.slen, psxRegs.cycle);
-#endif
 
   int clear_hack_addr = apply_hacks(&st);
 
@@ -10535,7 +10247,7 @@ static int noinline new_recompile_block(u_int addr)
 #endif
   stat_inc(stat_bc_direct);
   RS12_PASS(9);
-#if defined(RS12_HARNESS) && !defined(VITA)
+#if defined(RS12_HARNESS)
   rs12_out_hash(st.start);
   rs12_out_hash(st.slen);
   rs12_out_hash((u_int)(out - beginning));
