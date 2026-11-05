@@ -11,12 +11,14 @@ tests/expected/<arch>/<set>.txt; --update rewrites them. A contact sheet of the 
   tests/headless.py                 # all sets, compare
   tests/headless.py tektagt pacapp  # some sets
   tests/headless.py --update        # record the current hashes as expected
-Env: RS12_ROMS (default ~/system12), RETROARCH (default retroarch), RS12_CORE (default ../resys12_libretro.so)
+Env: RS12_ROMS (default ~/system12), RS11_ROMS (System 11 sets, default ~/system11), RETROARCH (default retroarch), RS12_CORE (default ../resys12_libretro.so)
 """
 import hashlib, os, platform, shutil, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROMS = os.environ.get("RS12_ROMS", os.path.expanduser("~/system12"))
+ROMS11 = os.environ.get("RS11_ROMS", os.path.expanduser("~/system11"))
+S11 = {"tekken2", "souledgea", "tekken"}  # System 11 sets (RS11_ROMS, namcoc76.zip next to them)
 CORE = os.environ.get("RS12_CORE", os.path.join(HERE, "..", "resys12_libretro.so"))
 RETROARCH = os.environ.get("RETROARCH", "retroarch")
 ARCH = platform.machine()
@@ -74,6 +76,10 @@ SETS = {
     "sws99": (4200, 300, PROBE),
     "sws2000": (5400, 300, PROBE + "," + keys((3700,) + START, (4000,) + START, (4300,) + START, mash=4400)),
     "sws2001": (4200, 300, PROBE),
+    # System 11
+    "tekken2": (3600, 300, PROBE),
+    "souledgea": (3600, 300, PROBE),
+    "tekken": (3600, 300, PROBE),
 }
 
 
@@ -90,7 +96,7 @@ def run_set(name, frames, every, script):
     env = dict(os.environ, RS12_INPUT=script, RS12_DUMP_DIR=dump, RS12_DUMP_EVERY=str(every), RS12_RTC="1762080000")
     log = os.path.join(OUT, name + ".log")
     with open(log, "w") as lf:
-        rc = subprocess.call([RETROARCH, "--appendconfig", cfg, "-L", CORE, os.path.join(ROMS, name + ".zip"),
+        rc = subprocess.call([RETROARCH, "--appendconfig", cfg, "-L", CORE, os.path.join(ROMS11 if name in S11 else ROMS, name + ".zip"),
                               "--max-frames=%d" % frames], env=env, stdout=lf, stderr=subprocess.STDOUT, timeout=1800)
     files = sorted(f for f in os.listdir(dump) if f.endswith(".ppm"))
     hashes = ["%s %s" % (f[:-4], hashlib.md5(open(os.path.join(dump, f), "rb").read()).hexdigest()) for f in files]

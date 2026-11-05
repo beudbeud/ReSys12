@@ -1,4 +1,4 @@
-# ReSys12 libretro core. Linux hosts: x86_64 (interpreter), armv7 / aarch64 (ari64 recompiler).
+# ReSys12 libretro core (Namco System 12 and System 11). Linux hosts: x86_64 (interpreter), armv7 / aarch64 (ari64 recompiler).
 #   make -C libretro                               native
 #   make -C libretro CC=aarch64-linux-gnu-gcc      Raspberry Pi 5 (64-bit OS)
 CC ?= gcc
@@ -18,6 +18,8 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
   $(ROOT)/src/s12/s12.c $(ROOT)/src/s12/s12_sub.c $(ROOT)/src/s12/s12_jvs.c $(ROOT)/src/s12/s12_hle.c \
   $(ROOT)/src/s12/s12_sound.c $(ROOT)/src/s12/s12_state.c $(ROOT)/src/s12/s12_link.c \
   $(ROOT)/src/s12/s12_cdxa.c $(ROOT)/src/s12/s12_cdmix.c $(ROOT)/src/s12/s12_atapi.c $(ROOT)/src/sh2/sh2.c \
+  $(ROOT)/src/s11/s11.c \
+  $(ROOT)/src/s11/s11_c76_stub.c \
   $(ROOT)/deps/libchdr/unity.c \
   $(ROOT)/src/h8/h8.c $(ROOT)/src/h8/h8_periph.c $(ROOT)/src/sound/c352.c \
   $(ROOT)/src/romload/s12_rom.c $(ROOT)/src/romload/rs12_zip.c $(ROOT)/src/romload/junzip.c \
@@ -26,7 +28,7 @@ SRC := $(PSX)/libpcsxcore/r3000a.c $(PSX)/libpcsxcore/psxmem.c $(PSX)/libpcsxcor
 
 DEFS := -DP_HAVE_MMAP=0 -DP_HAVE_POSIX_MEMALIGN=0 -DDISABLE_MEM_LUTS=0 -DGPU_NEON -DTEXTURE_CACHE_4BPP \
   -DTEXTURE_CACHE_8BPP -DNDEBUG -DUSE_ASYNC_GPU
-INC := -I$(PSX)/libpcsxcore -I$(PSX)/include -I$(PSX)/shim -I$(ROOT)/src/s12 -I$(ROOT)/src/romload \
+INC := -I$(PSX)/libpcsxcore -I$(PSX)/include -I$(PSX)/shim -I$(ROOT)/src/s12 -I$(ROOT)/src/s11 -I$(ROOT)/src/romload \
   -I$(ROOT)/src/sound -I$(ROOT)/src/h8 -I$(ROOT)/src/sys -I$(ROOT)/src/sh2 -I$(ROOT)/deps/libchdr/include -I.
 CFLAGS ?= -O3 -ffast-math
 CFLAGS += $(EXTRA_CFLAGS) -fPIC -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \

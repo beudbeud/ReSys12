@@ -60,6 +60,8 @@ add_library(rs12_core STATIC
   ${RS12_ROOT}/src/s12/s12_cdxa.c
   ${RS12_ROOT}/src/s12/s12_cdmix.c
   ${RS12_ROOT}/src/s12/s12_atapi.c
+  ${RS12_ROOT}/src/s11/s11.c
+  ${RS12_ROOT}/src/s11/s11_c76_stub.c
   ${RS12_ROOT}/src/sh2/sh2.c
   ${RS12_ROOT}/src/h8/h8.c
   ${RS12_ROOT}/src/h8/h8_periph.c
@@ -73,7 +75,7 @@ add_library(rs12_h8link OBJECT ${RS12_ROOT}/src/h8/h8.c ${RS12_ROOT}/src/h8/h8_p
 target_compile_options(rs12_h8link PRIVATE -include ${RS12_ROOT}/src/h8/h8_link_names.h -marm)
 target_include_directories(rs12_h8link PRIVATE ${RS12_ROOT}/src/h8 ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound ${RS12_PSX_INCLUDES})
 target_sources(rs12_core PRIVATE $<TARGET_OBJECTS:rs12_h8link>)
-target_include_directories(rs12_core PUBLIC ${RS12_PSX_INCLUDES} ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound
+target_include_directories(rs12_core PUBLIC ${RS12_PSX_INCLUDES} ${RS12_ROOT}/src/s12 ${RS12_ROOT}/src/s11 ${RS12_ROOT}/src/romload ${RS12_ROOT}/src/sound
   ${RS12_ROOT}/src/h8 ${RS12_ROOT}/src/sh2)
 # CDXA disc images: libchdr on the vitasdk zlib and zstd (the app links them too, a bundled copy would define them twice)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

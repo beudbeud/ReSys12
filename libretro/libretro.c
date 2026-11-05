@@ -1,4 +1,5 @@
-// ReSys12: libretro frontend. Content = a MAME System 12 zip (parent sets next to it). GPL-2.0-or-later.
+// ReSys12: libretro frontend. Content = a MAME System 12 or System 11 zip (parent sets, namcoc76.zip next to it).
+// GPL-2.0-or-later.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,6 +19,8 @@
 #include "s12_sound.h"
 #include "s12_cdxa.h"
 #include "s12_cdmix.h"
+#include "s11.h"
+#include "s11_c76.h"
 #include "new_dynarec/new_dynarec.h"
 
 extern void rs12_psx_bind(void);
@@ -233,6 +236,11 @@ static const struct { const char *set, *b[8]; } k_names[] = {
 	{ "technodr", { NULL, NULL, NULL, NULL, NULL, NULL, "Brake", "Gas" } },
 	{ "truckk", { NULL, NULL, "Horn", NULL, NULL, NULL, "Brake", "Gas" } },
 	{ "kartduel", { NULL, NULL, NULL, NULL, NULL, NULL, "Brake", "Gas" } },
+	// System 11
+	{ "tekken", { "Left Punch", "Right Punch", "Left Kick", "Right Kick" } },
+	{ "tekken2", { "Left Punch", "Right Punch", "Left Kick", "Right Kick" } },
+	{ "souledge", { "A (Horizontal Attack)", "B (Vertical Attack)", "K (Kick)", "G (Guard)" } },
+	{ "pocketrc", { NULL, "View", NULL, NULL, NULL, NULL, NULL, "Gas" } },
 };
 
 static void set_descriptors(const S12Game *g)
@@ -398,6 +406,11 @@ bool retro_load_game(const struct retro_game_info *game)
 			s_link_id = atoi(id.value);
 	}
 
+	// gpulib VRAM lines. System 11 as MAME: 2MB GPU RAM (1024 lines) on both CPU boards; tekken2 (COH-110, CXD8561Q)
+	// draws right only so. ponytail: tekken (COH-100, CXD8538Q) is wrong with 512 and 1024 lines alike (its tpage
+	// decode differs); RS11_VRAM512 keeps the 512-line PS1 wrapping for comparisons
+	extern int rs12_vram_ymask;
+	rs12_vram_ymask = s12.s11 && getenv("RS11_VRAM512") ? 511 : 1023;
 	memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__) || defined(LIGHTREC)
 	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
@@ -411,6 +424,8 @@ bool retro_load_game(const struct retro_game_info *game)
 #ifdef LIGHTREC
 	Config.cycle_multiplier = S12_CYCLE_MULTIPLIER;
 #endif
+	if (s12.s11) // System 11: the PS1's 33.8688 MHz CXD8530, pcsx_rearmed's PS1 rate
+		Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
 	if (getenv("RS12_CYCLE_MULT")) // comparisons
 		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
 
@@ -617,8 +632,17 @@ void retro_run(void)
 	poll_input();
 	test_hooks(frame++);
 	analog_input(); // once a frame, after the scripted buttons (the d-pad wheel ramps per call)
+	if (s12.s11)
+		s11_update_inputs();
 	psxRegs.stop = 0;
 	psxCpu->Execute(&psxRegs);
+	if (s12.s11) { // the C76 renders the C352 (same 88200 Hz rate as System 12's)
+		const int n = s11_c76_sound_frame(s_snd_buf, S12_SOUND_MAX_FRAMES);
+		if (n > 0)
+			audio_batch_cb(s_snd_buf, (size_t)n);
+		video_cb(s_fb, s_fb_w, s_fb_h, s_fb_w * 2);
+		return;
+	}
 	S12SoundBatch *b = s12_sub_sound_frame(s_snd_prev);
 	const int n = s12_sound_render(b, s_snd_buf);
 	s_snd_prev = b;
