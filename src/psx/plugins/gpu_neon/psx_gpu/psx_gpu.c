@@ -279,21 +279,31 @@ static void rs12_ti_build(psx_gpu_struct *psx_gpu, int bpp8)
     }
 }
 
+// ReSys12: the 4bpp cache of an interleaved texture, always in full; 0 = not interleaved (the caller converts).
+// Called by all 4bpp builders (C, NEON asm via rs12_update_texture_4bpp_rows, aarch64 SIMD)
+u32 rs12_ti_update4(psx_gpu_struct *psx_gpu)
+{
+  const u32 page = psx_gpu->current_texture_page;
+  if(!psx_gpu->tex_ti)
+  {
+    psx_gpu->ti_built4 &= ~(1ull << page);
+    return 0;
+  }
+  rs12_ti_build(psx_gpu, 0);
+  psx_gpu->dirty4_rows[page] = 0;
+  psx_gpu->dirty_textures_4bpp_mask &= ~(psx_gpu->current_texture_mask);
+  psx_gpu->ti_built4 |= 1ull << page;
+  return 1;
+}
+
 u32 rs12_update_texture_4bpp_rows(psx_gpu_struct *psx_gpu)
 {
   const u32 page = psx_gpu->current_texture_page;
   const u32 rows = psx_gpu->dirty4_rows[page];
   u32 tile_y, tile_x, sub_y, k;
 
-  if(psx_gpu->tex_ti) // ReSys12: interleaved, always in full
-  {
-    rs12_ti_build(psx_gpu, 0);
-    psx_gpu->dirty4_rows[page] = 0;
-    psx_gpu->dirty_textures_4bpp_mask &= ~(psx_gpu->current_texture_mask);
-    psx_gpu->ti_built4 |= 1ull << page;
+  if(rs12_ti_update4(psx_gpu))
     return 1;
-  }
-  psx_gpu->ti_built4 &= ~(1ull << page);
 
   psx_gpu->dirty4_rows[page] = 0;
   if(rows == 0 || rows == 0xFFFF)

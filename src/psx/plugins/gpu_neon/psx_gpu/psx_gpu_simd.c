@@ -2373,6 +2373,10 @@ static void update_texture_4bpp_cache(psx_gpu_struct *psx_gpu)
   u32 sub_y;
   vec_8x16u c_0x00f0;
 
+  extern u32 rs12_ti_update4(psx_gpu_struct *psx_gpu);
+  if(rs12_ti_update4(psx_gpu)) // ReSys12: interleaved texture (COH-100 GPU)
+    return;
+
   vram_ptr += (current_texture_page >> 4) * 256 * 1024;
   vram_ptr += (current_texture_page & 0xF) * 64;
 
