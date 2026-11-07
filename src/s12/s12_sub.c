@@ -447,7 +447,7 @@ void s12_event(void)
 		s11_event();
 		return;
 	}
-	if (s12.game && s12.game->state == S12_S_KARTDUEL)
+	if (s12.link)
 		s12_link_sync();
 #ifdef RS12_SUB_PROFILE
 	// RS12_PCHIST=<frame>: sample from that frame on

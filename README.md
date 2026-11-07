@@ -55,8 +55,8 @@ hear it; timing details that do not change what is on screen are simplified when
 - KC0xx protection and ROM DMA ported from MAME, with the DMA source fixes needed by Tekken Tag Tournament.
 - System 12 CD-XA board (SH-2, ATAPI drive from a CHD image, CD audio) for Um Jammer Lammy NOW! and Truck Kyosokyoku.
 - System 11: main board, KEYCUS protection, ROM banks, gun board, and the C76 (M37702 interpreter) with the C352.
-- Lightguns through the RetroArch lightgun device, wheels and levers on the analog stick, two-cabinet Kart Duel over
-  UDP or the Recalbox link-lobby.
+- Lightguns through the RetroArch lightgun device, wheels and levers on the analog stick, two-cabinet Kart Duel and Libero
+  Grande over UDP or the Recalbox link-lobby.
 
 ## 3. Supported Games
 
@@ -80,7 +80,7 @@ System 12 has no BIOS.
 | Ehrgeiz | `ehrgeiz`, `ehrgeizua`, `ehrgeizja` | 1998 | Playable |  |
 | Fighting Layer | `fgtlayer`, `fgtlayerja` | 1998 | Playable |  |
 | Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition | `toukon3` | 1997 | Playable |  |
-| Libero Grande | `lbgrande` | 1997 | Playable | the game draws 30 pictures a second |
+| Libero Grande | `lbgrande` | 1997 | Playable | the game draws 30 pictures a second; two cabinets play one match over the link (see [Kart Duel link](#kart-duel-link)) |
 | Super World Stadium '98 | `sws98` | 1998 | Boots | the test runs reach a match (first innings) |
 | Super World Stadium '99 | `sws99` | 1999 | Boots | as `sws98` |
 | Mr. Driller | `mrdrillr`, `mrdrillrja2` | 1999 | Playable |  |
@@ -158,6 +158,10 @@ L2 brake; Attack Pla Rail's lever is on the left stick.
 
 Kart Duel links two cabinets: core option `resys12_link` sets the UDP port, `resys12_link_id` the PCB ID (1 or 2,
 one per cabinet; restart the content after changing it).
+
+Libero Grande uses the same network board and the same `resys12_link` option, with no PCB ID: when one cabinet is
+playing, the other is asked JOIN IN? after its start, and LINK PLAY needs 2 credits (game option 1P/LINK SELECT, on by
+default). Tekken 3 and Ehrgeiz, also listed with the network board in MAME, do not use it in the dumped versions.
 
 Over the internet, the cabinets meet through the Recalbox [link-lobby](https://gitlab.com/recalbox/packages/recalbox-cores/link-lobby),
 as the System 23 core does: with `resys12_link` on, a `sys12_comm.cfg` next to the saves (`lobby = host[:port]`,

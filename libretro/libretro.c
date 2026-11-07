@@ -294,7 +294,7 @@ void retro_set_environment(retro_environment_t cb)
 	bool no_game = false;
 	cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
 	static const struct retro_variable vars[] = {
-		{ "resys12_link", "Cabinet link (Kart Duel, udp port, content restart); disabled|22260|22270" },
+		{ "resys12_link", "Cabinet link (Kart Duel, Libero Grande; udp port, content restart); disabled|22260|22270" },
 		{ "resys12_link_id", "Cabinet PCB ID (Kart Duel, content restart); 1|2" },
 		{ "resys12_service_mode", "Test button (operator menu): L3, or Start held 5 s; l3|start_hold" },
 		{ "resys12_service1", "Service button: R3, or Start + B held 5 s; r3|start_b_hold" },
@@ -381,7 +381,7 @@ bool retro_load_game(const struct retro_game_info *game)
 		fprintf(stderr, "ReSys12: %s: disc image %s/%s/*.chd not found (MAME layout)\n", name, dir, name);
 	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
 		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
-	if (s12.game->machine == S12_M_KARTDUEL) { // network board link: core option, RS12_LINK_PORT for any other port
+	if (s12.link) { // network board link: core option, RS12_LINK_PORT for any other port
 		extern int rs12_link_start(uint16_t port);
 		struct retro_variable v = { "resys12_link", NULL };
 		long port = 0;

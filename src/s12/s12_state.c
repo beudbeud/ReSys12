@@ -168,7 +168,7 @@ uint8_t *s12_state_save(size_t *size)
 		free(tmp);
 	} else if (n)
 		ms.failed = 1;
-	if (s12.game && s12.game->state == S12_S_KARTDUEL) { // the network board's CPU (other sets: no block)
+	if (s12.link) { // the network board's CPU (other sets: no block)
 		n = s12_link_state_size();
 		tmp = (uint8_t *)malloc(n);
 		if (tmp) {
@@ -281,7 +281,7 @@ int s12_state_load(const uint8_t *buf, size_t size)
 		r = get_block(&ms, s12_sub_state_load, s12_sub_state_size());
 	if (!r && !s12.s11)
 		r = get_block(&ms, s12_sound_state_load, s12_sound_state_size());
-	if (!r && s12.game->state == S12_S_KARTDUEL)
+	if (!r && s12.link)
 		r = get_block(&ms, s12_link_state_load, s12_link_state_size());
 	if (!r && s12.cdxa)
 		r = get_block(&ms, s12_cdxa_state_load, s12_cdxa_state_size());

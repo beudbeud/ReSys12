@@ -60,6 +60,9 @@ void s12_attach(S12Rom *rom)
 	const int st = rom->game->state;
 	s12.alt_bank = (st == S12_S_ALTBANK || st == S12_S_CDXA || st == S12_S_GOLGO13 || st == S12_S_TRUCKK);
 	s12.tektagt = (st == S12_S_TEKTAGT);
+	// network PCB: kartduel and lbgrande (same link program protocol; MAME maps it on kartduel only). MAME also names
+	// Tekken 3 and Ehrgeiz, but their dumped programs never touch it
+	s12.link = st == S12_S_KARTDUEL || !strcmp(rom->game->name, "lbgrande");
 	const int m = rom->game->machine;
 	s12.s11 = (m == S12_M_S11);
 	s12.cdxa = (m == S12_M_CDXA || m == S12_M_QUESTFF || m == S12_M_TRUCKK);
@@ -329,7 +332,7 @@ static uint16_t board_r16(uint32_t a)
 			v++; // yend
 		return v;
 	}
-	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
+	if (s12.link) {
 		uint16_t *r = kartduel_ram(a);
 		if (r) {
 			s12_link_sync();
@@ -393,7 +396,7 @@ static void board_w16(uint32_t a, uint16_t d)
 	if (s12.game && s12.game->state == S12_S_PTBLANK2 && (a & ~0x800000u) >= 0x1f788000u &&
 		(a & ~0x800000u) < 0x1f788004u)
 		return; // gun board outputs (recoil, start lamps) and "start reading"
-	if (s12.game && s12.game->state == S12_S_KARTDUEL) {
+	if (s12.link) {
 		uint16_t *r = kartduel_ram(a);
 		if (r) {
 			s12_link_sync();
@@ -450,7 +453,7 @@ void s12_write8(uint32_t phys, uint32_t v)
 	uint16_t *w = NULL;
 	if (a >= 0x1f080000u && a < 0x1f084000u)
 		w = &s12.shared[(a - 0x1f080000u) >> 1];
-	else if (s12.game && s12.game->state == S12_S_KARTDUEL && (w = kartduel_ram(a)) != NULL) // (memory too)
+	else if (s12.link && (w = kartduel_ram(a)) != NULL) // (memory too)
 		s12_link_sync();
 	if (w) {
 		*w = (phys & 1) ? (uint16_t)((*w & 0x00ff) | ((v & 0xff) << 8)) : (uint16_t)((*w & 0xff00) | (v & 0xff));
