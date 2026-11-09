@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include "s12_rom.h"
+#include "s10.h"
 
 // JAMMA inputs, active high here (inverted when the H8 reads them)
 enum {
@@ -44,6 +45,7 @@ typedef struct {
 	int alt_bank, boot_hack, tektagt, cdxa;
 	int link; // the network PCB (s12_link.c) is fitted
 	int s11; // a System 11 set: the board is src/s11 (s11.h)
+	const S10Game *s10; // a System 10 set: the board is src/s10 (s10.h); rom and game are NULL
 	// tektagt protection (KC044)
 	int has_tektagt_dma;
 	uint32_t tektagdmaoffset;
@@ -65,6 +67,8 @@ extern S12Board s12;
 
 // attach a loaded set before psxInit/psxReset
 void s12_attach(S12Rom *rom);
+// System 10: the set s10_load loaded (the core's board hooks go to src/s10)
+void s12_attach_s10(const S10Game *g);
 // JAMMA input bytes as the H8 reads them at 0x300000-0x300003
 uint8_t s12_in_r(int offset);
 // print distinct unhandled board addresses (diagnostics)

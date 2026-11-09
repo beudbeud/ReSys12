@@ -30,3 +30,4 @@ Thumbs.db
 libretro/obj/
 libretro/tests/out/
 __pycache__/
+tools/tlcsdis/tlcsdis

@@ -26,6 +26,7 @@
 #include "mem.h"
 #include "plugin.h"
 #include "s12_hle.h" // ReSys12: game routines run natively
+#include "s12.h"     // ReSys12: the board (the System 10 memory map)
 #include "lightrec-private.h"
 
 #if (defined(__arm__) || defined(__aarch64__)) && !defined(ALLOW_LIGHTREC_ON_ARM)
@@ -327,7 +328,9 @@ static struct lightrec_mem_map_ops cache_ctrl_ops = {
 // ReSys12: the System 12 map. 4MB of RAM mirrored once in the 8MB window; the 4MB program flash at 0x1fc00000 read
 // directly up to 0x1feffff and through the handlers above it (tektagt's protection register at 0x1ff00000); the
 // board (0x1f000000-0x1fbfffff outside the scratchpad and the hardware registers) on the handlers; the unused
-// PS1 entries have no length. The code LUT covers RAM and the flash (lightrec-private.h RAM_SIZE / BIOS_SIZE)
+// PS1 entries have no length. The code LUT covers RAM and the flash (lightrec-private.h RAM_SIZE / BIOS_SIZE).
+// System 10 (lightrec_plugin_init): the boot ROM read directly up to 0x1fdfffff, the handlers from 0x1fe00000 (the
+// EXIO board and the light guns: the core's LUT tells ROM from board)
 static struct lightrec_mem_map lightrec_map[] = {
 	[PSX_MAP_KERNEL_USER_RAM] = {
 		/* Kernel and user memory */
@@ -451,7 +454,13 @@ static int lightrec_plugin_init(void)
 	lightrec_map[PSX_MAP_SCRATCH_PAD].address = psxRegs.ptrs.psxH;
 	lightrec_map[PSX_MAP_HW_REGISTERS].address = psxRegs.ptrs.psxH + 0x1000;
 	lightrec_map[PSX_MAP_PARALLEL_PORT].address = psxRegs.ptrs.psxP;
-	lightrec_map[PSX_MAP_BIOS_MIRROR4].address = psxRegs.ptrs.psxR + 0x300000; // ReSys12: (code fetches)
+	{ // ReSys12: the board window inside the 4MB ROM area, per board (the map is static: a reload may switch boards)
+		const u32 direct = s12.s10 ? 0x200000 : 0x300000;
+		lightrec_map[PSX_MAP_BIOS].length = direct;
+		lightrec_map[PSX_MAP_BIOS_MIRROR4].pc = 0x1fc00000 + direct;
+		lightrec_map[PSX_MAP_BIOS_MIRROR4].length = 0x400000 - direct;
+		lightrec_map[PSX_MAP_BIOS_MIRROR4].address = psxRegs.ptrs.psxR + direct; // (code fetches)
+	}
 
 	// ReSys12: the code buffer is mapped executable here (the core's own memory uses calloc, P_HAVE_MMAP=0)
 	code_buffer = mmap(0, CODE_BUFFER_SIZE,

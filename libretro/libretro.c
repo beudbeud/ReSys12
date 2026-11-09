@@ -1,5 +1,5 @@
-// ReSys12: libretro frontend. Content = a MAME System 12 or System 11 zip (parent sets, namcoc76.zip next to it).
-// GPL-2.0-or-later.
+// ReSys12: libretro frontend. Content = a MAME System 12, System 11 or System 10 zip (parent sets, namcoc76.zip next
+// to the System 11 sets). GPL-2.0-or-later.
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +13,8 @@
 #include "psxmem.h"
 #include "plugins.h"
 #include "../src/psx/frontend/plugin_lib.h"
+#include "../src/psx/plugins/dfsound/out.h"
+#include "../src/psx/plugins/dfsound/spu_config.h"
 #include "s12.h"
 #include "s12_rom.h"
 #include "s12_state.h"
@@ -21,10 +23,16 @@
 #include "s12_cdmix.h"
 #include "s11.h"
 #include "s11_c76.h"
+#include "s10.h"
+#include "s10_state.h"
+#include "s10_exio.h"
+#include "s10_memp3.h"
 #include "new_dynarec/new_dynarec.h"
 
-extern void rs12_psx_bind(void);
+extern void rs12_psx_bind(int spu);
 extern void (*rs12_GPUrearmedCallbacks)(const struct rearmed_cbs *);
+extern void CALLBACK SPUirq(int);
+extern void CALLBACK SPUschedule(unsigned int);
 
 static retro_environment_t env_cb;
 static retro_video_refresh_t video_cb;
@@ -40,6 +48,31 @@ static int s_vertical; // the screen is turned a quarter: the picture is 3:4
 static int s_loaded;
 static S12SoundBatch *s_snd_prev;
 static int16_t s_snd_buf[S12_SOUND_MAX_FRAMES * 2];
+
+// ---- System 10 audio: dfsound's output driver; SPUasync (once a frame, at vblank) feeds 44100 Hz stereo ----
+#define SND10_MAX (44100 / 30 * 2)
+static int16_t s_snd10[SND10_MAX * 2];
+static size_t s_snd10_n; // frames
+
+static int snd_init(void) { return 0; }
+static void snd_finish(void) {}
+static int snd_busy(void) { return 0; }
+static void snd_feed(void *buf, int bytes)
+{
+	size_t n = (size_t)bytes / 4;
+	if (s_snd10_n + n > SND10_MAX)
+		n = SND10_MAX - s_snd10_n;
+	memcpy(s_snd10 + s_snd10_n * 2, buf, n * 4);
+	s_snd10_n += n;
+}
+void out_register_libretro(struct out_driver *drv)
+{
+	drv->name = "libretro";
+	drv->init = snd_init;
+	drv->finish = snd_finish;
+	drv->busy = snd_busy;
+	drv->feed = snd_feed;
+}
 
 // ---- video: gpulib hands the displayed VRAM rectangle to pl_vout_flip (15bpp BGR555 or 24bpp BGR) ----
 #define FB_W 1024
@@ -152,13 +185,14 @@ static void analog_input(void)
 // ---- cabinet Test / Service buttons, as the blueflash core: on the stick clicks (L3 / R3 of player 1), or for arcade
 // panels and wheels with no stick to click, a chord held 5 s presses the button once for 0.2 s the moment the 5 s are
 // reached (Start alone = Test, Start + B = Service; B during a Start hold turns it into the other chord). Start and B
-// still reach the game during the hold ----
+// still reach the game during the hold. System 10's Test is a slide switch: the hold (or L3) flips it ----
 static int s_test_hold, s_service_hold; // resys12_service_mode / resys12_service1: 1 = long hold, 0 = stick click
 static struct hold { unsigned held, press; int fired; } s_hold_test, s_hold_service;
 
-static int hold_update(struct hold *h, int held)
+// 1 on the frame the 5 s are reached, then (press frames) while the press lasts
+static int hold_update(struct hold *h, int held, unsigned press)
 {
-	const unsigned threshold = 299, press = 12; // 5 s and 0.2 s at 59.82 Hz
+	const unsigned threshold = 299; // 5 s at 59.82 Hz
 	if (!held)
 		h->held = 0, h->fired = 0;
 	else if (!h->fired && ++h->held >= threshold)
@@ -181,7 +215,7 @@ static void read_service_vars(void)
 	memset(&s_hold_service, 0, sizeof(s_hold_service));
 }
 
-static void poll_input(void)
+static void poll_vars(void)
 {
 	static int vars_read;
 	bool updated = false;
@@ -189,6 +223,11 @@ static void poll_input(void)
 		vars_read = 1;
 		read_service_vars();
 	}
+}
+
+static void poll_input(void)
+{
+	poll_vars();
 	input_poll_cb();
 	uint32_t sys = 0;
 	for (int pl = 0; pl < 2; pl++) {
@@ -211,13 +250,161 @@ static void poll_input(void)
 	int test = in_st(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3) != 0;
 	int service = (s12.in.player[0] & S12_IN_SERVICE) != 0;
 	if (s_test_hold) // ponytail: the L3 / R3 descriptors still read Test / Service in this mode
-		test = hold_update(&s_hold_test, start && !b);
+		test = hold_update(&s_hold_test, start && !b, 12);
 	if (s_service_hold)
-		service = hold_update(&s_hold_service, start && b);
+		service = hold_update(&s_hold_service, start && b, 12);
 	if (test)
 		sys |= S12_SYS_TEST;
 	s12.in.player[0] = (s12.in.player[0] & ~(uint32_t)S12_IN_SERVICE) | (service ? S12_IN_SERVICE : 0);
 	s12.in.system = sys;
+}
+
+// ---- System 10 input: RetroPad -> JAMMA (MAME IN1). Y X B A L R = buttons 1-6, Select = coin, L3 = test switch (a
+// slide switch: each press flips it), R3 = service ----
+static const unsigned k_pad10[10] = { RETRO_DEVICE_ID_JOYPAD_RIGHT, RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_DOWN,
+	RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_Y, RETRO_DEVICE_ID_JOYPAD_X, RETRO_DEVICE_ID_JOYPAD_B,
+	RETRO_DEVICE_ID_JOYPAD_START, RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_L };
+// IN1 bit of k_pad10[i] for player 1 (player 2: the same << 8 for 0-7, << 4 for buttons 4-6)
+static const uint32_t k_bit10[10] = { S10_P1_RIGHT, S10_P1_LEFT, S10_P1_DOWN, S10_P1_UP, S10_P1_B1, S10_P1_B2, S10_P1_B3,
+	S10_START1, S10_P1_B4, S10_P1_B5 };
+static int s_test10;    // test switch position
+static int s_trackball; // nflclsfb
+static int s_taiko;     // the Taiko no Tatsujin sets (drums on the EXIO analog inputs)
+
+static void poll_input_s10(void)
+{
+	poll_vars();
+	input_poll_cb();
+	uint32_t in = 0;
+	if (s_trackball) { // nflclsfb, MAME's layout: players 1-4 Start, A / B = pass 1 / 2 (EXIO_IN1); player 1's Up / Down /
+		// Y = the menu's select up / down / enter; L / R / X of players 1 and 3 = the left / right side's choose L / R, decide
+		static const uint32_t start[4] = { 1u << 5, 1u << 6, 1u << 13, 1u << 14 };
+		static const uint32_t side[2][3] = { { 1u << 1, 1u << 9, 1u << 7 }, { 1u << 0, 1u << 8, 1u << 15 } };
+		static const unsigned side_pad[3] = { RETRO_DEVICE_ID_JOYPAD_L, RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_X };
+		uint32_t pass = 0;
+		for (unsigned pl = 0; pl < 4; pl++) {
+			if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START))
+				in |= start[pl];
+			if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A))
+				pass |= 1u << (pl == 1 ? 2 : pl == 2 ? 1 : pl);
+			if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B))
+				pass |= 0x10u << (pl == 1 ? 2 : pl == 2 ? 1 : pl);
+			if (!(pl & 1)) // (the left side is players 1-2, the right 3-4)
+				for (unsigned i = 0; i < 3; i++)
+					if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, side_pad[i]))
+						in |= side[pl / 2][i];
+			if (pl < 2 && input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT))
+				in |= pl ? S10_COIN2 : S10_COIN1;
+		}
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))
+			in |= 1u << 3;
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))
+			in |= 1u << 2;
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y))
+			in |= 1u << 4;
+		s10_exio_in1 = pass;
+	}
+	if (s_taiko) { // MAME's layout: player 1's Up / Down / Start = the menu's select up / down, enter; the drums below
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP))
+			in |= 1u << 3;
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN))
+			in |= 1u << 2;
+		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START))
+			in |= 1u << 4;
+		for (unsigned pl = 0; pl < 2; pl++)
+			if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT))
+				in |= pl ? S10_COIN2 : S10_COIN1;
+	}
+	for (unsigned pl = 0; pl < (s_trackball || s_taiko ? 0u : 2u); pl++) {
+		for (unsigned i = 0; i < 10; i++)
+			if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, k_pad10[i]))
+				in |= i < 8 ? k_bit10[i] << (8 * pl) : k_bit10[i] << (4 * pl);
+		if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R))
+			in |= S10_P1_B6 << (4 * pl);
+		const int ax = input_state_cb(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+		const int ay = input_state_cb(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
+		if (ax < -12000) in |= S10_P1_LEFT << (8 * pl);
+		if (ax > 12000) in |= S10_P1_RIGHT << (8 * pl);
+		if (ay < -12000) in |= S10_P1_UP << (8 * pl);
+		if (ay > 12000) in |= S10_P1_DOWN << (8 * pl);
+		if (input_state_cb(pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT))
+			in |= pl ? S10_COIN2 : S10_COIN1;
+	}
+	const int start = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START) != 0;
+	const int b = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B) != 0;
+	static int l3_prev;
+	const int l3 = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3) != 0;
+	if (s_test_hold ? hold_update(&s_hold_test, start && !b, 1) : (l3 && !l3_prev))
+		s_test10 ^= 1;
+	l3_prev = l3;
+	if (s_test10)
+		in |= S10_TEST;
+	if (s_service_hold ? hold_update(&s_hold_service, start && b, 12)
+		: input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3) != 0)
+		in |= S10_SERVICE;
+	if (s10_has_gun()) { // the left stick aims while it is pushed, else the lightgun (or mouse); the trigger is button 1
+		static float gx[2] = { 0.5f, 0.5f }, gy[2] = { 0.5f, 0.5f };
+		for (unsigned pl = 0; pl < 2; pl++) {
+			const int sx = input_state_cb(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X);
+			const int sy = input_state_cb(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y);
+			if (sx < -2600 || sx > 2600 || sy < -2600 || sy > 2600) {
+				gx[pl] = 0.5f + sx / 65536.0f;
+				gy[pl] = 0.5f + sy / 65536.0f;
+				in &= ~((S10_P1_RIGHT | S10_P1_LEFT | S10_P1_DOWN | S10_P1_UP) << (8 * pl));
+			} else if (!input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_IS_OFFSCREEN)) {
+				const int lx = input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_X);
+				const int ly = input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SCREEN_Y);
+				if (lx || ly) { // (0,0 = no gun input)
+					gx[pl] = (lx + 32768) / 65535.0f;
+					gy[pl] = (ly + 32768) / 65535.0f;
+				}
+			}
+			s10_set_gun((int)pl, gx[pl], gy[pl]);
+			if (input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_TRIGGER)) // (g13jnr: button 2)
+				in |= (s10_has_gun() == S10_GUN_P3 ? S10_P1_B2 : S10_P1_B1) << (8 * pl);
+			if (input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_START))
+				in |= S10_START1 << (8 * pl);
+			if (input_state_cb(pl, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_SELECT))
+				in |= pl ? S10_COIN2 : S10_COIN1;
+		}
+	}
+	if (s_trackball) // nflclsfb: players 1-4's trackballs on the mouse, or the left stick (up to 16 counts a frame), as seen
+		// on the rotated screen: X = the game's X, up = its Y
+		for (unsigned pl = 0; pl < 4; pl++)
+			for (unsigned axis = 0; axis < 2; axis++) {
+				const int m = input_state_cb(pl, RETRO_DEVICE_MOUSE, 0, axis ? RETRO_DEVICE_ID_MOUSE_Y : RETRO_DEVICE_ID_MOUSE_X);
+				const int a = input_state_cb(pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
+					axis ? RETRO_DEVICE_ID_ANALOG_Y : RETRO_DEVICE_ID_ANALOG_X);
+				s10_exio_trackball[pl * 2 + axis] += (uint8_t)(axis ? -(m + a / 2048) : m + a / 2048); // (the game's Y: up)
+			}
+	if (s_taiko) { // drum sensors (MAME EXIO_ANALOG1-8, per player: right rim, right surface, left surface, left rim), full
+		// strength while the button is held: R, A, Y, L
+		static const unsigned pad[4] = { RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_Y,
+			RETRO_DEVICE_ID_JOYPAD_L };
+		for (unsigned i = 0; i < 8; i++)
+			s10_exio_analog[i] = input_state_cb(i / 4, RETRO_DEVICE_JOYPAD, 0, pad[i & 3]) ? 0x3ff : 0;
+	} else if (s10_io_kind(s12.s10) == S10_IO_EXIO && !s10_has_gun()) { // EXIO analog: per player left stick, right stick (MAME
+		// EXIO_ANALOG1-8: P1 left X/Y, P1 right X/Y, P2 ..., 10 bits; channels 2, 3, 6, 7 PORT_REVERSE)
+		static const unsigned stk[2] = { RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_INDEX_ANALOG_RIGHT };
+		for (unsigned i = 0; i < 8; i++) {
+			const int v = input_state_cb(i / 4, RETRO_DEVICE_ANALOG, stk[(i / 2) & 1],
+				(i & 1) ? RETRO_DEVICE_ID_ANALOG_Y : RETRO_DEVICE_ID_ANALOG_X);
+			const unsigned a = (unsigned)(v + 32768) >> 6;
+			s10_exio_analog[i] = (uint16_t)((i & 3) == 1 || (i & 3) == 2 ? 0x3ff - a : a);
+		}
+	}
+	if (s10_has_gun() == S10_GUN_P3) { // g13jnr's scope sensor: a switch (as MAME's PORT_TOGGLE) on button 3 / aux A
+		static int prev, on = 1;
+		const int sc = input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B) ||
+			input_state_cb(0, RETRO_DEVICE_LIGHTGUN, 0, RETRO_DEVICE_ID_LIGHTGUN_AUX_A);
+		if (sc && !prev)
+			on ^= 1;
+		prev = sc;
+		in &= ~(uint32_t)S10_P1_B3;
+		if (on)
+			in |= S10_G13_SCOPE;
+	}
+	s10_in1 = in;
 }
 
 // ---- RetroArch input descriptors: the names its remap menu shows. One row per parent set (clones inherit), empty
@@ -285,6 +472,57 @@ static void set_descriptors(const S12Game *g)
 	env_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
 }
 
+static void set_descriptors_s10(void)
+{
+	static const char *const names[10] = { "Right", "Left", "Down", "Up", "Button 1", "Button 2", "Button 3", "Start",
+		"Button 4", "Button 5" };
+	static struct retro_input_descriptor desc[40];
+	unsigned n = 0;
+	if (s_taiko) {
+		static const char *const drum[4] = { "Right rim (Ka)", "Right surface (Don)", "Left surface (Don)", "Left rim (Ka)" };
+		static const unsigned pad[4] = { RETRO_DEVICE_ID_JOYPAD_R, RETRO_DEVICE_ID_JOYPAD_A, RETRO_DEVICE_ID_JOYPAD_Y,
+			RETRO_DEVICE_ID_JOYPAD_L };
+		for (unsigned pl = 0; pl < 2; pl++) {
+			for (unsigned i = 0; i < 4; i++)
+				desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, pad[i], drum[i] };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Coin" };
+		}
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "Select up" };
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "Select down" };
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Enter" };
+	}
+	if (s_trackball) {
+		for (unsigned pl = 0; pl < 4; pl++) {
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "Pass 1" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "Pass 2" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
+				RETRO_DEVICE_ID_ANALOG_X, "Trackball X (or the mouse)" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT,
+				RETRO_DEVICE_ID_ANALOG_Y, "Trackball Y (or the mouse)" };
+		}
+		for (unsigned pl = 0; pl < 4; pl += 2) {
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, pl ? "Right side choose L" : "Left side choose L" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, pl ? "Right side choose R" : "Left side choose R" };
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, pl ? "Right side decide" : "Left side decide" };
+			desc[n++] = (struct retro_input_descriptor){ pl / 2, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Coin" };
+		}
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "Select up" };
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "Select down" };
+		desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Enter" };
+	}
+	for (unsigned pl = 0; pl < (s_trackball || s_taiko ? 0u : 2u); pl++) {
+		for (unsigned i = 0; i < 10; i++)
+			desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, k_pad10[i], names[i] };
+		desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "Button 6" };
+		desc[n++] = (struct retro_input_descriptor){ pl, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Coin" };
+	}
+	desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3, "Test (switch)" };
+	desc[n++] = (struct retro_input_descriptor){ 0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3, "Service" };
+	desc[n] = (struct retro_input_descriptor){ 0, 0, 0, 0, NULL };
+	env_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+}
+
 static int s_link_id; // Kart Duel PCB ID to write into the EEPROM settings (0: leave them)
 
 // ---- libretro ----
@@ -337,10 +575,49 @@ void retro_get_system_av_info(struct retro_system_av_info *info)
 	info->geometry.max_height = FB_H;
 	info->geometry.aspect_ratio = s_vertical ? 3.0f / 4.0f : 4.0f / 3.0f;
 	info->timing.fps = 53693175.0 / 263 / 3413; // PSX GPU NTSC, ~59.82 Hz (psxcounters.c FPS_FRACTIONAL_NTSC)
-	info->timing.sample_rate = S12_SOUND_RATE;
+	info->timing.sample_rate = s12.s10 ? 44100 : S12_SOUND_RATE; // (the SPU, or the C352)
 }
 
 void retro_set_controller_port_device(unsigned port, unsigned device) { (void)port; (void)device; }
+
+// System 10: s10_load loaded the set; the board, inputs and the SPU
+static int load_s10(const char *dir, const char *name, const char *msg)
+{
+	s12_attach_s10(s10_game(s10_find_game(name)));
+	s_trackball = !strcmp(s12.s10->name, "nflclsfb");
+	s_taiko = !strncmp(s12.s10->name, "taiko", 5);
+	s_test10 = 0;
+	if (s_trackball) { // (a portrait monitor: the game draws its play screens a quarter turn; MAME says ROT0)
+		unsigned rot = 1; // 90 degrees counter-clockwise
+		env_cb(RETRO_ENVIRONMENT_SET_ROTATION, &rot);
+		s_vertical = 1;
+	}
+	s10_state_set_game(s12.s10->name);
+	set_descriptors_s10();
+	extern int rs12_vram_ymask, rs12_gpu_type1;
+	rs12_vram_ymask = 1023; // CXD8561CQ with 2MB GPU RAM (MAME): 1024 VRAM lines
+	rs12_gpu_type1 = 0;
+	memset(&Config, 0, sizeof(Config));
+	Config.FractionalFramerate = 1; // (frames at the GPU's ~59.82 Hz, the rate retro_get_system_av_info declares)
+#if defined(__arm__) || defined(__aarch64__) || defined(LIGHTREC)
+	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
+#else
+	Config.Cpu = CPU_INTERPRETER;
+#endif
+	// MAME: CXD8606BQ at 101.4912 MHz, one instruction step per 4 clocks = 25.37M steps a second; pcsx_rearmed counts
+	// 100 = one 33.8688 MHz cycle per instruction: 33.8688 / 25.3728 * 100 = 133
+	Config.cycle_multiplier = 133;
+	if (getenv("RS10_P3_CLOCK"))
+		s10_p3_clock_pct = atoi(getenv("RS10_P3_CLOCK"));
+	if (getenv("RS12_CYCLE_MULT"))
+		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
+	spu_config.iUseReverb = 1;
+	spu_config.iUseInterpolation = 1;
+	spu_config.iVolume = 512; // (0.5: the Taiko sets' drums over their music go 1.5x past full scale, and crackle)
+	spu_config.iUseThread = 0;
+	(void)dir; (void)msg;
+	return 0;
+}
 
 bool retro_load_game(const struct retro_game_info *game)
 {
@@ -359,76 +636,86 @@ bool retro_load_game(const struct retro_game_info *game)
 	char *dot = strrchr(name, '.');
 	if (dot)
 		*dot = 0;
-	if (s12_find_game(name) < 0) {
-		fprintf(stderr, "ReSys12: unknown set %s\n", name);
-		return false;
-	}
-	char msg[256] = "";
-	memset(&s_rom, 0, sizeof(s_rom));
-	if (s12_rom_load(&s_rom, dir, name, msg, sizeof(msg)) != 0) {
-		fprintf(stderr, "ReSys12: load %s: %s\n", name, msg);
-		return false;
-	}
-	s12_attach(&s_rom);
-	set_descriptors(s12.game);
-	{ // MAME ROT90 / ROT270 (vertical screens); libretro counts quarter turns counter-clockwise
-		const int rot = s12_game(s12_find_game(name))->rot;
-		unsigned turns = rot == 90 ? 3 : rot == 180 ? 2 : rot == 270 ? 1 : 0;
-		env_cb(RETRO_ENVIRONMENT_SET_ROTATION, &turns);
-		s_vertical = turns & 1;
-	}
-	if (s12.cdxa && s12_cdxa_open_disc(dir, name) != 0)
-		fprintf(stderr, "ReSys12: %s: disc image %s/%s/*.chd not found (MAME layout)\n", name, dir, name);
-	if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
-		s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
-	if (s12.link) { // network board link: core option, RS12_LINK_PORT for any other port
-		extern int rs12_link_start(uint16_t port);
-		struct retro_variable v = { "resys12_link", NULL };
-		long port = 0;
-		if (getenv("RS12_LINK_PORT"))
-			port = strtol(getenv("RS12_LINK_PORT"), NULL, 10);
-		else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
-			port = strtol(v.value, NULL, 10); // ("disabled" gives 0)
-		if (port > 0) { // the lobby (sys12_comm.cfg next to the saves) pairs cabinets beyond the LAN
-			extern void rs12_link_lobby_config(const char *save_dir, const char *game, const char *user);
-			const char *save = NULL, *user = NULL;
-			if (env_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save) && save) {
-				env_cb(RETRO_ENVIRONMENT_GET_USERNAME, &user);
-				rs12_link_lobby_config(save, name, user);
-			}
+	char msg[512] = "";
+	s_vertical = 0;
+	const int is_s10 = s12_find_game(name) < 0 && s10_find_game(name) >= 0;
+	if (is_s10) {
+		if (s10_load(dir, name, msg, sizeof(msg)) != 0) {
+			fprintf(stderr, "ReSys12: load %s: %s\n", name, msg);
+			return false;
 		}
-		if (port > 0 && port < 65536 - 8 && !rs12_link_start((uint16_t)port))
-			fprintf(stderr, "ReSys12: link: no free udp port at %ld\n", port);
-		struct retro_variable id = { "resys12_link_id", NULL };
-		if (getenv("RS12_LINK_ID"))
-			s_link_id = atoi(getenv("RS12_LINK_ID"));
-		else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &id) && id.value)
-			s_link_id = atoi(id.value);
-	}
+		load_s10(dir, name, msg);
+	} else {
+		if (s12_find_game(name) < 0) {
+			fprintf(stderr, "ReSys12: unknown set %s\n", name);
+			return false;
+		}
+		memset(&s_rom, 0, sizeof(s_rom));
+		if (s12_rom_load(&s_rom, dir, name, msg, sizeof(msg)) != 0) {
+			fprintf(stderr, "ReSys12: load %s: %s\n", name, msg);
+			return false;
+		}
+		s12_attach(&s_rom);
+		set_descriptors(s12.game);
+		{ // MAME ROT90 / ROT270 (vertical screens); libretro counts quarter turns counter-clockwise
+			const int rot = s12_game(s12_find_game(name))->rot;
+			unsigned turns = rot == 90 ? 3 : rot == 180 ? 2 : rot == 270 ? 1 : 0;
+			env_cb(RETRO_ENVIRONMENT_SET_ROTATION, &turns);
+			s_vertical = turns & 1;
+		}
+		if (s12.cdxa && s12_cdxa_open_disc(dir, name) != 0)
+			fprintf(stderr, "ReSys12: %s: disc image %s/%s/*.chd not found (MAME layout)\n", name, dir, name);
+		if (getenv("RS12_RTC")) // comparisons: fixed RTC4543 time at reset (unix seconds, UTC)
+			s12.rtc_base = strtoll(getenv("RS12_RTC"), NULL, 0);
+		if (s12.link) { // network board link: core option, RS12_LINK_PORT for any other port
+			extern int rs12_link_start(uint16_t port);
+			struct retro_variable v = { "resys12_link", NULL };
+			long port = 0;
+			if (getenv("RS12_LINK_PORT"))
+				port = strtol(getenv("RS12_LINK_PORT"), NULL, 10);
+			else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &v) && v.value)
+				port = strtol(v.value, NULL, 10); // ("disabled" gives 0)
+			if (port > 0) { // the lobby (sys12_comm.cfg next to the saves) pairs cabinets beyond the LAN
+				extern void rs12_link_lobby_config(const char *save_dir, const char *game, const char *user);
+				const char *save = NULL, *user = NULL;
+				if (env_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save) && save) {
+					env_cb(RETRO_ENVIRONMENT_GET_USERNAME, &user);
+					rs12_link_lobby_config(save, name, user);
+				}
+			}
+			if (port > 0 && port < 65536 - 8 && !rs12_link_start((uint16_t)port))
+				fprintf(stderr, "ReSys12: link: no free udp port at %ld\n", port);
+			struct retro_variable id = { "resys12_link_id", NULL };
+			if (getenv("RS12_LINK_ID"))
+				s_link_id = atoi(getenv("RS12_LINK_ID"));
+			else if (env_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &id) && id.value)
+				s_link_id = atoi(id.value);
+		}
 
-	// gpulib VRAM lines. System 11 as MAME: 2MB GPU RAM (1024 lines) on both CPU boards; tekken2 (COH-110, CXD8561Q)
-	// draws right only so. tekken / tekken2o sets (COH-100, CXD8538Q = MAME psxgpu type 1) have their own tpage and
-	// draw area layout, gpulib rewrites it (rs12_gpu_type1); RS11_VRAM512 keeps the 512-line PS1 wrapping for comparisons
-	extern int rs12_vram_ymask, rs12_gpu_type1;
-	rs12_vram_ymask = s12.s11 && getenv("RS11_VRAM512") ? 511 : 1023;
-	rs12_gpu_type1 = s12.s11 && (s12.game->flags & S12_G_GPU1);
-	memset(&Config, 0, sizeof(Config));
+		// gpulib VRAM lines. System 11 as MAME: 2MB GPU RAM (1024 lines) on both CPU boards; tekken2 (COH-110, CXD8561Q)
+		// draws right only so. tekken / tekken2o sets (COH-100, CXD8538Q = MAME psxgpu type 1) have their own tpage and
+		// draw area layout, gpulib rewrites it (rs12_gpu_type1); RS11_VRAM512 keeps the 512-line PS1 wrapping for comparisons
+		extern int rs12_vram_ymask, rs12_gpu_type1;
+		rs12_vram_ymask = s12.s11 && getenv("RS11_VRAM512") ? 511 : 1023;
+		rs12_gpu_type1 = s12.s11 && (s12.game->flags & S12_G_GPU1);
+		memset(&Config, 0, sizeof(Config));
 #if defined(__arm__) || defined(__aarch64__) || defined(LIGHTREC)
-	Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
+		Config.Cpu = getenv("RS12_INTERP") ? CPU_INTERPRETER : CPU_DYNAREC;
 #else
-	Config.Cpu = CPU_INTERPRETER;
+		Config.Cpu = CPU_INTERPRETER;
 #endif
-	// CD-XA sets keep the interpreter's rate: at 120 the library VSync timeout loop (32768 x 14 instructions) is shorter
-	// than a frame, so full-frame waits time out and the boot handshake with the SH2 (768 VSyncs) expires too soon.
-	// lightrec (x86_64) keeps it too: it times as the interpreter (the test pictures)
-	Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC && !s12.cdxa ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
+		// CD-XA sets keep the interpreter's rate: at 120 the library VSync timeout loop (32768 x 14 instructions) is shorter
+		// than a frame, so full-frame waits time out and the boot handshake with the SH2 (768 VSyncs) expires too soon.
+		// lightrec (x86_64) keeps it too: it times as the interpreter (the test pictures)
+		Config.cycle_multiplier = Config.Cpu == CPU_DYNAREC && !s12.cdxa ? S12_CYCLE_MULTIPLIER_DYNAREC : S12_CYCLE_MULTIPLIER;
 #ifdef LIGHTREC
-	Config.cycle_multiplier = S12_CYCLE_MULTIPLIER;
+		Config.cycle_multiplier = S12_CYCLE_MULTIPLIER;
 #endif
-	if (s12.s11) // System 11: the PS1's 33.8688 MHz CXD8530, pcsx_rearmed's PS1 rate
-		Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
-	if (getenv("RS12_CYCLE_MULT")) // comparisons
-		Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
+		if (s12.s11) // System 11: the PS1's 33.8688 MHz CXD8530, pcsx_rearmed's PS1 rate
+			Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
+		if (getenv("RS12_CYCLE_MULT")) // comparisons
+			Config.cycle_multiplier = atoi(getenv("RS12_CYCLE_MULT"));
+	}
 
 	pl_rearmed_cbs.pl_vout_open = vout_open;
 	pl_rearmed_cbs.pl_vout_close = vout_close;
@@ -455,7 +742,7 @@ bool retro_load_game(const struct retro_game_info *game)
 			ndrc_g.hacks = (int)strtol(getenv("RS12_NDHACKS"), NULL, 0);
 	}
 #endif
-	rs12_psx_bind();
+	rs12_psx_bind(is_s10);
 	if (psxInit() != 0) {
 		fprintf(stderr, "ReSys12: psxInit failed\n");
 		return false;
@@ -464,6 +751,12 @@ bool retro_load_game(const struct retro_game_info *game)
 	GPU_init();
 	rs12_GPUrearmedCallbacks(&pl_rearmed_cbs); // GPU_init clears the settings
 	GPU_open(NULL, NULL, NULL);
+	if (is_s10) {
+		SPU_init();
+		SPU_open();
+		SPU_registerCallback(SPUirq);
+		SPU_registerScheduleCb(SPUschedule);
+	}
 	psxReset();
 	s_snd_prev = NULL;
 	s_loaded = 1;
@@ -490,13 +783,18 @@ void retro_unload_game(void)
 		extern void rs12_link_stop(void);
 		rs12_link_stop();
 	}
-#ifdef RS12_HARNESS
 	if (getenv("RS12_UNMAPPED")) // diagnostics: distinct unhandled board addresses
-		s12_dump_unmapped();
-#endif
+		(s12.s10 ? s10_dump_unmapped : s12_dump_unmapped)();
+	if (s12.s10) {
+		SPU_close();
+		SPU_shutdown();
+	}
 	GPU_close();
 	psxShutdown();
-	s12_rom_free(&s_rom);
+	if (s12.s10)
+		s10_unload();
+	else
+		s12_rom_free(&s_rom);
 	s_loaded = 0;
 }
 
@@ -507,8 +805,8 @@ void retro_reset(void)
 }
 
 // ---- test hooks (headless runs): RS12_INPUT="frame:p1hex:syshex[:analog],..." as the Vita's input.txt (a P1 mask
-// 0xfffff mashes buttons from then on; analog -100..100 holds the lever / the wheel); RS12_DUMP_DIR +
-// RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
+// 0xfffff mashes buttons from then on; analog -100..100 holds the lever / the wheel; System 10: p1 = the MAME IN1 bits
+// of s10.h, sys unused); RS12_DUMP_DIR + RS12_DUMP_EVERY=n write every n-th picture as a PPM ----
 static void test_hooks(uint32_t frame)
 {
 	{ // tests: RS12_STATETEST=s,l saves a state at frame s and loads it back at frame l
@@ -521,9 +819,10 @@ static void test_hooks(uint32_t frame)
 				st_s = st_l = 0;
 		}
 		if (st_l && frame == st_s)
-			st_buf = s12_state_save(&st_n);
+			st_buf = s12.s10 ? s10_state_save_buf(&st_n) : s12_state_save(&st_n);
 		if (st_l && frame == st_l && st_buf)
-			fprintf(stderr, "ReSys12: state test: load %s\n", s12_state_load(st_buf, st_n) == 0 ? "ok" : "failed");
+			fprintf(stderr, "ReSys12: state test: load %s\n",
+				(s12.s10 ? s10_state_load_buf(st_buf, st_n) : s12_state_load(st_buf, st_n)) == 0 ? "ok" : "failed");
 	}
 	if (getenv("RS12_REALTIME")) { // tests: 60 frames a second of wall time (two linked cabinets in step)
 		static struct timespec t0;
@@ -562,15 +861,20 @@ static void test_hooks(uint32_t frame)
 		in_i++;
 	}
 	s_test_analog = cur_an / 100.0f;
+	uint32_t p1 = cur_p1;
 	if (cur_p1 == 0xfffff) {
 		if (frame % 6 == 0) {
 			mash_rng = mash_rng * 1103515245u + 12345u;
-			mash_p1 = (mash_rng >> 8) & 0x3ff & ~(uint32_t)0x3;
+			mash_p1 = s12.s10 ? (mash_rng >> 8) & 0xff : (mash_rng >> 8) & 0x3ff & ~(uint32_t)0x3;
 		}
-		s12.in.player[0] |= (frame % 6) < 4 ? mash_p1 : 0;
-	} else
-		s12.in.player[0] |= cur_p1;
-	s12.in.system |= cur_sys;
+		p1 = (frame % 6) < 4 ? mash_p1 : 0;
+	}
+	if (s12.s10)
+		s10_in1 |= p1;
+	else {
+		s12.in.player[0] |= p1;
+		s12.in.system |= cur_sys;
+	}
 #ifdef RS12_HARNESS
 	{ // RS12_RAMDUMP=frame,frame,...: main RAM to <RS12_DUMP_DIR>/ram_<frame>.bin; RS12_WATCH=lo-hi[,from]: stores logged
 		static const char *rd; static int rd_init;
@@ -613,6 +917,24 @@ static void test_hooks(uint32_t frame)
 void retro_run(void)
 {
 	static uint32_t frame;
+	if (s12.s10) { // System 10: the SPU renders at vblank (SPU_async) into s_snd10, the MP3 board mixes over it
+		poll_input_s10();
+		test_hooks(frame++);
+		s_snd10_n = 0;
+		psxRegs.stop = 0;
+		psxCpu->Execute(&psxRegs);
+		s10_memp3_render(s_snd10, (int)s_snd10_n);
+		if (s_snd10_n) {
+			static FILE *wav;
+			if (!wav && getenv("RS12_PCM")) // tests: the raw sound
+				wav = fopen(getenv("RS12_PCM"), "wb");
+			if (wav)
+				fwrite(s_snd10, 4, s_snd10_n, wav);
+			audio_batch_cb(s_snd10, s_snd10_n);
+		}
+		video_cb(s_fb, s_fb_w, s_fb_h, s_fb_w * 2);
+		return;
+	}
 	extern int rs12_link_ring_id;
 	extern int rs12_link_holding(void);
 	if (!frame && rs12_link_holding()) { // (a black screen while the lobby pairs the cabinets)
@@ -656,10 +978,12 @@ void retro_run(void)
 	video_cb(s_fb, s_fb_w, s_fb_h, s_fb_w * 2);
 }
 
+static uint8_t *state_save(size_t *n) { return s12.s10 ? s10_state_save_buf(n) : s12_state_save(n); }
+
 size_t retro_serialize_size(void)
 {
 	size_t size = 0;
-	uint8_t *buf = s_loaded ? s12_state_save(&size) : NULL;
+	uint8_t *buf = s_loaded ? state_save(&size) : NULL;
 	free(buf);
 	return size;
 }
@@ -667,7 +991,7 @@ size_t retro_serialize_size(void)
 bool retro_serialize(void *data, size_t size)
 {
 	size_t n = 0;
-	uint8_t *buf = s_loaded ? s12_state_save(&n) : NULL;
+	uint8_t *buf = s_loaded ? state_save(&n) : NULL;
 	const bool ok = buf && n <= size;
 	if (ok)
 		memcpy(data, buf, n);
@@ -677,19 +1001,32 @@ bool retro_serialize(void *data, size_t size)
 
 bool retro_unserialize(const void *data, size_t size)
 {
-	return s_loaded && s12_state_load(data, size) == 0;
+	if (!s_loaded)
+		return false;
+	return (s12.s10 ? s10_state_load_buf((const uint8_t *)data, size) : s12_state_load(data, size)) == 0;
 }
 
 unsigned retro_get_region(void) { return RETRO_REGION_NTSC; }
 
+// the save RAM: System 12 / 11's EEPROM, System 10's settings block (NAND 0 block 1, or the MEM(M) flash at 0x40000)
 void *retro_get_memory_data(unsigned id)
 {
-	return id == RETRO_MEMORY_SAVE_RAM && s_loaded ? s12.eeprom : NULL;
+	size_t n = 0;
+	if (id != RETRO_MEMORY_SAVE_RAM || !s_loaded)
+		return NULL;
+	return s12.s10 ? s10_nvram(&n) : (void *)s12.eeprom;
 }
 
 size_t retro_get_memory_size(unsigned id)
 {
-	return id == RETRO_MEMORY_SAVE_RAM && s_loaded ? sizeof(s12.eeprom) : 0;
+	size_t n = 0;
+	if (id != RETRO_MEMORY_SAVE_RAM || !s_loaded)
+		return 0;
+	if (s12.s10)
+		s10_nvram(&n);
+	else
+		n = sizeof(s12.eeprom);
+	return n;
 }
 
 void retro_cheat_reset(void) {}

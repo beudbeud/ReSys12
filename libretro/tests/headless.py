@@ -4,14 +4,16 @@
 Each set boots a fresh board (no .srm) and runs N frames with a scripted input (libretro.c RS12_INPUT:
 "frame:p1_hex:sys_hex[:analog]", p1 bits 0-3 up/down/left/right, 4-9 buttons 1-6, 10 start, 12-13 buttons 7-8;
 sys 1 coin 1; p1 fffff mashes from then on; analog -100..100 holds the lever / wheel; gun games shoot the screen
-centre). The core dumps every n-th picture (RS12_DUMP_DIR) and the pictures are hashed. Hashes are compared with
+centre; System 10 sets: p1 = the MAME IN1 bits of src/s10/s10.h, fffff mashes buttons 1-3 and the directions). The
+core dumps every n-th picture (RS12_DUMP_DIR) and the pictures are hashed. Hashes are compared with
 tests/expected/<arch>/<set>.txt; --update rewrites them. A contact sheet of the pictures goes to the output dir
 (out/<set>.png) when Pillow is installed: check that the last pictures show gameplay when writing a script.
 
   tests/headless.py                 # all sets, compare
   tests/headless.py tektagt pacapp  # some sets
   tests/headless.py --update        # record the current hashes as expected
-Env: RS12_ROMS (default ~/system12), RS11_ROMS (System 11 sets, default ~/system11), RETROARCH (default retroarch), RS12_CORE (default ../resys12_libretro.so)
+Env: RS12_ROMS (default ~/system12), RS11_ROMS (System 11 sets, default ~/system11), RS10_ROMS (System 10 sets, default
+~/system10), RETROARCH (default retroarch), RS12_CORE (default ../resys12_libretro.so)
 """
 import hashlib, os, platform, shutil, subprocess, sys
 
@@ -19,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROMS = os.environ.get("RS12_ROMS", os.path.expanduser("~/system12"))
 ROMS11 = os.environ.get("RS11_ROMS", os.path.expanduser("~/system11"))
 S11 = {"tekken", "tekken2", "souledgea", "ptblank2ua", "gunbarla"}  # System 11 sets (RS11_ROMS, namcoc76.zip next to them)
+ROMS10 = os.environ.get("RS10_ROMS", os.path.expanduser("~/system10"))
 CORE = os.environ.get("RS12_CORE", os.path.join(HERE, "..", "resys12_libretro.so"))
 RETROARCH = os.environ.get("RETROARCH", "retroarch")
 ARCH = platform.machine()
@@ -84,6 +87,29 @@ SETS = {
     "gunbarla": (4200, 300, COIN_START),
 }
 
+# System 10 (the ReSys10 core's scripts: 10-frame presses of IN1 bits, then a mash)
+COIN1_10, START1_10, B1_10, B2_10 = 0x20000000, 0x80, 0x10, 0x20
+
+
+def keys10(*ev, mash=None):
+    out = ["%d:%x:0,%d:0:0" % (f, v, f + 10) for f, v in ev]
+    return ",".join(out + (["%d:fffff:0" % mash] if mash else []))
+
+
+PLAY10 = keys10((900, COIN1_10), (960, COIN1_10), (1100, START1_10), (1300, START1_10), (1500, B1_10), mash=1700)
+S10 = {
+    "mrdrilr2": (3600, 300, PLAY10), "gamshara": (3600, 300, PLAY10), "gjspace": (3600, 300, PLAY10),
+    "knpuzzle": (3600, 300, PLAY10), "konotako": (3600, 300, PLAY10), "mrdrilrg": (3600, 300, PLAY10),
+    "chocovdr": (3600, 300, PLAY10), "panikuru": (3600, 300, PLAY10), "startrgn": (3600, 300, PLAY10),
+    "kd2001": (3600, 300, PLAY10), "gahaha": (3600, 300, PLAY10), "gahaha2": (3600, 300, PLAY10),
+    "ptblank3": (3600, 300, PLAY10), "nflclsfb": (3600, 300, PLAY10), "taiko2": (3600, 300, PLAY10),
+    # g13jnr: the rifle stays at the screen centre (the calibration target), button 2 is the trigger, the scope sensor
+    # is on (frontend default)
+    "g13jnr": (4200, 300, keys10((900, COIN1_10), (1100, START1_10), *((f, B2_10) for f in range(1700, 4200, 60)))),
+    "nicetsuk": (3600, 300, PLAY10), "squizchs": (3600, 300, PLAY10), "ippo": (3600, 300, PLAY10), "ippo2": (3600, 300, PLAY10),
+}
+SETS.update(S10)
+
 
 def run_set(name, frames, every, script):
     dump = os.path.join(OUT, name)
@@ -95,16 +121,20 @@ def run_set(name, frames, every, script):
                 'input_driver = "null"\ninput_joypad_driver = "null"\nmidi_driver = "null"\n'
                 'savefile_directory = "%s"\nsavestate_directory = "%s"\n' % (dump, dump))
     # fixed RTC4543 time: games show the date and seed RNGs from it
-    env = dict(os.environ, RS12_INPUT=script, RS12_DUMP_DIR=dump, RS12_DUMP_EVERY=str(every), RS12_RTC="1762080000")
+    env = dict(os.environ, RS12_INPUT=script, RS12_DUMP_DIR=dump, RS12_DUMP_EVERY=str(every), RS12_RTC="1762080000",
+               RS12_PCM=os.path.join(dump, "sound.raw"))
+    roms = ROMS10 if name in S10 else ROMS11 if name in S11 else ROMS
     log = os.path.join(OUT, name + ".log")
     with open(log, "w") as lf:
-        rc = subprocess.call([RETROARCH, "--appendconfig", cfg, "-L", CORE, os.path.join(ROMS11 if name in S11 else ROMS, name + ".zip"),
+        rc = subprocess.call([RETROARCH, "--appendconfig", cfg, "-L", CORE, os.path.join(roms, name + ".zip"),
                               "--max-frames=%d" % frames], env=env, stdout=lf, stderr=subprocess.STDOUT, timeout=1800)
     files = sorted(f for f in os.listdir(dump) if f.endswith(".ppm"))
     hashes = ["%s %s" % (f[:-4], hashlib.md5(open(os.path.join(dump, f), "rb").read()).hexdigest()) for f in files]
     blank = files and all(len(set(open(os.path.join(dump, f), "rb").read()[20:])) <= 1 for f in files[-3:])
+    pcm = os.path.join(dump, "sound.raw")  # (System 10: the SPU's output; silence = a sound regression)
+    silent = name in S10 and (not os.path.exists(pcm) or len(set(open(pcm, "rb").read())) <= 1)
     sheet(dump, os.path.join(OUT, name + ".png"))
-    return rc, hashes, blank
+    return rc, hashes, blank, silent
 
 
 def sheet(dump, out, cols=5, tw=256):
@@ -135,7 +165,7 @@ def main():
     failed = 0
     for name in names:
         frames, every, script = SETS[name]
-        rc, hashes, blank = run_set(name, frames, every, script)
+        rc, hashes, blank, silent = run_set(name, frames, every, script)
         exp = os.path.join(exp_dir, name + ".txt")
         status = "ok"
         if rc != 0 or not hashes or blank:
@@ -150,6 +180,8 @@ def main():
                 status = "CHANGED at frames %s" % " ".join(diff)
         else:
             status = "ok (no expected file, run with --update)"
+        if silent and not status.startswith("FAIL"):
+            status += ", no sound"
         failed += status.startswith(("FAIL", "CHANGED"))
         print("%-10s %s" % (name, status), flush=True)
     sys.exit(1 if failed else 0)

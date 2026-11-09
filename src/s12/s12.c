@@ -15,6 +15,7 @@
 #include "s12_hle.h"
 #include "s12_cdxa.h"
 #include "s11.h"
+#include "s10_bus.h"
 
 S12Board s12;
 static uint16_t s_link_regs[16]; // kartduel link board registers (kartduel_ram)
@@ -98,6 +99,14 @@ void s12_attach(S12Rom *rom)
 		s11_attach(rom);
 }
 
+void s12_attach_s10(const S10Game *g)
+{
+	memset(&s12, 0, sizeof(s12));
+	s12_link_reset();
+	s12.s10 = g;
+	s12.bank_count = 1;
+}
+
 // ---- ROM bank window 0x1fa00000-0x1fbfffff ----
 // Mapped through the core read LUT (512KB granularity) for speed. tektagt has protection registers at 0x1fb00000 and
 // 0x1fb80000, so that half of the window stays on the handler path.
@@ -143,6 +152,11 @@ static void bankoffset_w(uint16_t data)
 
 void s12_mem_reset(void)
 {
+	if (s12.s10) { // System 10: the unscrambled boot program, no game routines run natively
+		rs12_hle_lz_head = 0;
+		s10_mem_reset();
+		return;
+	}
 	// program flash -> boot ROM area
 	const S12Rom *r = s12.rom;
 	if (r && r->rgn[S12_RGN_MAIN]) {
@@ -206,6 +220,10 @@ void s12_board_state_load(const void *src)
 
 void s12_cpu_reset(void)
 {
+	if (s12.s10) {
+		s10_cpu_reset();
+		return;
+	}
 	if (s12.s11) {
 		s11_cpu_reset();
 		return;
@@ -419,30 +437,45 @@ static void board_w16(uint32_t a, uint16_t d)
 	note_unmapped(a, 1);
 }
 
+// (System 10: the board is src/s10, s10_bus.h)
 uint16_t s12_read16(uint32_t phys)
 {
+	if (s12.s10)
+		return s10_read16(phys);
 	return board_r16(phys & ~1u);
 }
 
 uint8_t s12_read8(uint32_t phys)
 {
+	if (s12.s10)
+		return s10_read8(phys);
 	const uint16_t v = board_r16(phys & ~1u);
 	return (uint8_t)((phys & 1) ? v >> 8 : v);
 }
 
 uint32_t s12_read32(uint32_t phys)
 {
+	if (s12.s10)
+		return s10_read32(phys);
 	phys &= ~3u;
 	return board_r16(phys) | ((uint32_t)board_r16(phys + 2) << 16);
 }
 
 void s12_write16(uint32_t phys, uint32_t v)
 {
+	if (s12.s10) {
+		s10_write16(phys, v);
+		return;
+	}
 	board_w16(phys & ~1u, (uint16_t)v);
 }
 
 void s12_write8(uint32_t phys, uint32_t v)
 {
+	if (s12.s10) {
+		s10_write8(phys, v);
+		return;
+	}
 	// byte writes reach 16-bit devices as a word with the byte in its lane
 	const uint32_t a = phys & ~1u;
 	if (s12.s11) {
@@ -468,6 +501,10 @@ void s12_write8(uint32_t phys, uint32_t v)
 
 void s12_write32(uint32_t phys, uint32_t v)
 {
+	if (s12.s10) {
+		s10_write32(phys, v);
+		return;
+	}
 	phys &= ~3u;
 	board_w16(phys, (uint16_t)v);
 	board_w16(phys + 2, (uint16_t)(v >> 16));
@@ -476,6 +513,10 @@ void s12_write32(uint32_t phys, uint32_t v)
 // ---- ROM DMA (MAME namcos12_rom_read on PSX DMA channel 5) ----
 void s12_dma5_done(void)
 {
+	if (s12.s10) {
+		s10_dma5_done();
+		return;
+	}
 	HW_DMA5_CHCR &= SWAP32(~0x01000000u);
 	DMA_INTERRUPT(5);
 }
@@ -483,6 +524,10 @@ void s12_dma5_done(void)
 void psxDma5(uint32_t madr, uint32_t bcr, uint32_t chcr)
 {
 	int32_t size;
+	if (s12.s10) { // System 10: the NAND / CD-ROM PIO DMA
+		s10_dma5(madr, bcr, chcr);
+		return;
+	}
 	if (chcr & 0x200) {
 		uint32_t ba = bcr >> 16;
 		if (!ba)

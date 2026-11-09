@@ -27,6 +27,7 @@
 #include "c352.h"
 #include "s12_rom.h"
 #include "s11.h"
+#include "s10_bus.h"
 
 // main CPU cycles between two sub CPU slices (~4 scanlines: each slice leaves the recompiled code, 2150 cost 1.7ms a
 // frame in tektagt fights; MAME sets no interleave for this board). The frontend may change it for measurements
@@ -443,6 +444,10 @@ void s12_pchist_dump(void)
 
 void s12_event(void)
 {
+	if (s12.s10) { // System 10: the 100 Hz I/O update interrupt (reschedules itself)
+		s10_event();
+		return;
+	}
 	if (s12.s11) {
 		s11_event();
 		return;
@@ -463,6 +468,10 @@ void s12_event(void)
 
 void s12_vblank(int state)
 {
+	if (s12.s10) {
+		s10_vblank(state);
+		return;
+	}
 	if (s12.s11) {
 		s11_vblank(state);
 		return;

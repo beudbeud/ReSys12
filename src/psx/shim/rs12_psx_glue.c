@@ -1,5 +1,6 @@
-// ReSys12: glue between the pcsx_rearmed core subset and the System 12 board.
-// Replaces the PS1-only parts left out of the build (plugins.c, psxcommon.c, CD-ROM, SPU, SIO/pads, BIOS HLE).
+// ReSys12: glue between the pcsx_rearmed core subset and the System 12 / 11 / 10 boards.
+// Replaces the PS1-only parts left out of the build (plugins.c, psxcommon.c, CD-ROM, SIO/pads, BIOS HLE); the SPU is
+// pcsx_rearmed's dfsound on System 10 (the PS1 SPU, CXD2938Q), stubs on System 12 / 11.
 // GPL-2.0-or-later (same as pcsx_rearmed).
 #include <stdarg.h>
 #include <stdio.h>
@@ -83,9 +84,55 @@ GPUgetScreenInfo GPU_getScreenInfo;
 void (*rs12_GPUrearmedCallbacks)(const struct rearmed_cbs *);
 
 extern void *const rs12_gpu_entry[];
+extern void *const rs12_spu_entry[];
 
-void rs12_psx_bind(void)
+// ---- SPU: System 12 / 11 have none (C352 on the H8 / C76 side); System 10 has the PS1's, pcsx_rearmed's dfsound
+// (shim/rs12_spu_bind.c), bound by rs12_psx_bind(1) ----
+static unsigned short CALLBACK spu_read(unsigned long reg, unsigned int cycles) { (void)reg; (void)cycles; return 0; }
+static void CALLBACK spu_write(unsigned long reg, unsigned short val, unsigned int cycles) { (void)reg; (void)val; (void)cycles; }
+static void CALLBACK spu_dma(unsigned short *p, int n, unsigned int cycles) { (void)p; (void)n; (void)cycles; }
+SPUinit             SPU_init;
+SPUshutdown         SPU_shutdown;
+SPUopen             SPU_open;
+SPUclose            SPU_close;
+SPUwriteRegister    SPU_writeRegister = spu_write;
+SPUreadRegister     SPU_readRegister = spu_read;
+SPUwriteDMAMem      SPU_writeDMAMem = spu_dma;
+SPUreadDMAMem       SPU_readDMAMem = spu_dma;
+SPUfreeze           SPU_freeze;
+SPUasync            SPU_async;
+SPUregisterCallback SPU_registerCallback;
+SPUregisterScheduleCb SPU_registerScheduleCb;
+
+void rs12_psx_bind(int spu)
 {
+	if (spu) {
+		SPU_init = (SPUinit)rs12_spu_entry[0];
+		SPU_shutdown = (SPUshutdown)rs12_spu_entry[1];
+		SPU_open = (SPUopen)rs12_spu_entry[2];
+		SPU_close = (SPUclose)rs12_spu_entry[3];
+		SPU_writeRegister = (SPUwriteRegister)rs12_spu_entry[4];
+		SPU_readRegister = (SPUreadRegister)rs12_spu_entry[5];
+		SPU_writeDMAMem = (SPUwriteDMAMem)rs12_spu_entry[6];
+		SPU_readDMAMem = (SPUreadDMAMem)rs12_spu_entry[7];
+		SPU_freeze = (SPUfreeze)rs12_spu_entry[8];
+		SPU_async = (SPUasync)rs12_spu_entry[9];
+		SPU_registerCallback = (SPUregisterCallback)rs12_spu_entry[10];
+		SPU_registerScheduleCb = (SPUregisterScheduleCb)rs12_spu_entry[11];
+	} else {
+		SPU_init = NULL;
+		SPU_shutdown = NULL;
+		SPU_open = NULL;
+		SPU_close = NULL;
+		SPU_writeRegister = spu_write;
+		SPU_readRegister = spu_read;
+		SPU_writeDMAMem = spu_dma;
+		SPU_readDMAMem = spu_dma;
+		SPU_freeze = NULL;
+		SPU_async = NULL;
+		SPU_registerCallback = NULL;
+		SPU_registerScheduleCb = NULL;
+	}
 	GPU_init = (GPUinit)rs12_gpu_entry[0];
 	GPU_shutdown = (GPUshutdown)rs12_gpu_entry[1];
 	GPU_open = (GPUopen)rs12_gpu_entry[2];
@@ -138,22 +185,9 @@ void sioInterrupt(void) {}
 // no PSX BIOS HLE on System 12 (the compiler thread's mixed mode asks only for EXEC_CALLER_HLE)
 int psxBiosSoftcallEnded(void) { return 1; }
 
-void spuDelayedIrq(void) {}
-void spuUpdate(void) {}
-
 void psxBiosCheckBranch(void) {}
 void (*biosA0[256])();
 void (**biosB0)();
 void (*biosC0[256 + 128])();
 static void hle_nop(void) {}
 void (* const psxHLEt[hleop_count_])() = { hle_nop };
-
-// ---- SPU: System 12 has none (C352 on the H8 side) ----
-static unsigned short CALLBACK spu_read(unsigned long reg, unsigned int cycles) { (void)reg; (void)cycles; return 0; }
-static void CALLBACK spu_write(unsigned long reg, unsigned short val, unsigned int cycles) { (void)reg; (void)val; (void)cycles; }
-static void CALLBACK spu_dma(unsigned short *p, int n, unsigned int cycles) { (void)p; (void)n; (void)cycles; }
-SPUwriteRegister    SPU_writeRegister = spu_write;
-SPUreadRegister     SPU_readRegister = spu_read;
-SPUwriteDMAMem      SPU_writeDMAMem = spu_dma;
-SPUreadDMAMem       SPU_readDMAMem = spu_dma;
-SPUasync            SPU_async = NULL;
