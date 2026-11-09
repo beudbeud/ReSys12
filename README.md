@@ -1,14 +1,14 @@
 <h1 align="center">ReSys12</h1>
 
 <p align="center">
-  <b>Namco System 12 and System 11 arcade emulator, as a libretro core</b><br>
-  pcsx_rearmed based &middot; R3000A dynarecs (aarch64, ARMv7, x86_64) &middot; NEON GPU rasterizer &middot; C352 sound<br>
+  <b>Namco System 12, System 11 and System 10 arcade emulator, as a libretro core</b><br>
+  pcsx_rearmed based &middot; R3000A dynarecs (aarch64, ARMv7, x86_64) &middot; NEON GPU rasterizer &middot; C352 and SPU sound<br>
   Fork of <a href="https://github.com/Reyanon/ReSys12">ReSys12</a> by Reyanon
 </p>
 
 > This repository is a fork of [Reyanon/ReSys12](https://github.com/Reyanon/ReSys12), the Namco System 12 emulator for
-> PlayStation Vita. It keeps the emulation and makes it a libretro core: System 11 support, the lightrec recompiler on
-> x86_64, Recalbox packaging. The PS Vita port is not here: get it from the
+> PlayStation Vita. It keeps the emulation and makes it a libretro core: System 11 and System 10 support, the lightrec
+> recompiler on x86_64, Recalbox packaging. The PS Vita port is not here: get it from the
 > [original project](https://github.com/Reyanon/ReSys12) and its releases.
 
 ---
@@ -30,17 +30,21 @@
 ## 1. Introduction
 
 ReSys12 is an emulator for the Namco System 12 arcade board, the PlayStation-based hardware behind
-Tekken Tag Tournament, Tekken 3, Soul Calibur, Ehrgeiz, Point Blank 2 and others, and for the earlier System 11 board
-(Tekken 2, Soul Edge, Xevious 3D/G, ...). The CPU, GTE and GPU come from
-[pcsx_rearmed](https://github.com/notaz/pcsx_rearmed); the boards themselves (ROM banking, protection, H8/3002 and C76
-sound / I/O CPUs, C352 sound, EEPROM, JVS I/O) are ported from [MAME](https://www.mamedev.org/).
+Tekken Tag Tournament, Tekken 3, Soul Calibur, Ehrgeiz, Point Blank 2 and others, for the earlier System 11 board
+(Tekken 2, Soul Edge, Xevious 3D/G, ...) and for the later System 10 (Mr. Driller 2, Gamshara, Point Blank 3, Taiko no
+Tatsujin, ...). The CPU, GTE, GPU and SPU come from [pcsx_rearmed](https://github.com/notaz/pcsx_rearmed); the boards
+themselves (ROM banking, protection, H8/3002 and C76 sound / I/O CPUs, C352 sound, EEPROM, JVS I/O, the System 10
+memory boards, decrypters, NAND flash and TLCS-900/H sub CPUs) are ported from [MAME](https://www.mamedev.org/).
 
 System 12 is a PlayStation with twice the CPU clock (R3000A at 48 MHz), up to 4 MB of RAM, banked ROM
 instead of a CD drive, and a separate H8/3002 with a 32-voice C352 for sound. System 11 keeps the PlayStation clock and
-drives its C352 from a Mitsubishi C76 (M37702) microcontroller.
+drives its C352 from a Mitsubishi C76 (M37702) microcontroller. System 10 is a PlayStation with a faster CPU
+(CXD8606BQ, 101.4912 MHz / 4 instruction steps in MAME), 4 MB of RAM, 2 MB of VRAM and the PS1 SPU, its game on a
+flash or NAND memory board (see [System 10](#system-10)).
 
 ReSys12 is a [libretro](https://www.libretro.com/) core for Linux (x86_64, and ARM such as the Raspberry Pi 5). Recalbox
-ships it as the `namcos12` and `namcos11` systems (core `resys12`). Board accuracy is kept where the player can see or
+ships it as the `namcos12`, `namcos11` and `namcos10` systems (core `resys12`); the core picks the board from the
+set name. Board accuracy is kept where the player can see or
 hear it; timing details that do not change what is on screen are simplified when that buys speed.
 
 ## 2. Highlights
@@ -57,6 +61,10 @@ hear it; timing details that do not change what is on screen are simplified when
 - System 11: main board, KEYCUS protection, ROM banks, gun board, and the C76 (M37702 interpreter) with the C352.
 - Lightguns through the RetroArch lightgun device, wheels and levers on the analog stick, two-cabinet Kart Duel and Libero
   Grande over UDP or the Recalbox link-lobby.
+- System 10: MEM(M), MEM(N), MEM(IO) and MEM(P3) memory boards with the ns10 type 1 / 2 decrypters, NAND and Intel flash,
+  the EXIO I/O board and the MEM(P3) MP3 board (MAME's TLCS-900/H core for their TMP95C061 sub CPUs, recompiled through
+  GNU lightning on aarch64 and x86_64; LC82310 MP3 decoder with minimp3), the PS1 SPU (dfsound), light guns, trackballs,
+  the Taiko drums, the Taiko sets' ATAPI CD-ROM from a CHD.
 
 ## 3. Supported Games
 
@@ -119,10 +127,50 @@ x86_64 and on the Pi 5.
 
 The gun sets are clones of the System 12 `ptblank2`: they read the files they share with it from `ptblank2.zip`.
 
+### System 10
+
+The core picks System 10 from the set name (`src/s10/s10_games.inc`, generated from MAME `namcos10.cpp`). System 10 has
+no BIOS: the boot program is unscrambled from the NAND / flash into the 4 MB boot ROM area, as MAME's driver init does.
+The game lives on a memory board:
+
+| Board | Storage | Emulated |
+|---|---|---|
+| MEM(M) | Intel 28F640J5 flash + data ROMs, type 1 decrypter | yes |
+| MEM(N) | 1-14 Samsung / Toshiba NAND chips, PIO DMA (channel 5), type 2 decrypters | yes |
+| MEM(IO) | MEM(N) with a data XOR register (Hajime no Ippo) | yes (the punch pad I/O is not) |
+| MEM(P3) | MEM(N) + TMP95C061 sub CPU + LC82310 MP3 decoder | yes: sub CPU, MP3 music, analog inputs (g13jnr's rifle) |
+
+I/O boards: EXIO (TMP95C061 + I/O, ident 0x30: the CPU runs the program the game uploads; analog inputs; light guns read
+by the main CPU) is emulated; MGEXIO (H8/3007, medal games) and EXFINAL (Medal no Tatsujin) are not.
+
+Statuses: headless runs (3600 frames: boot, coin, start, mashed buttons) on x86_64 and the same pictures on the Pi 5.
+
+| Set | Status | Notes |
+|---|---|---|
+| `mrdrilr2` (+ `j`, `u`) | Playable | MEM(M) |
+| `mrdrilrg` | Playable | |
+| `gamshara`, `gamsharao` | Playable | |
+| `knpuzzle` | Playable | |
+| `konotako` | Playable | |
+| `chocovdr` | Playable | |
+| `panikuru` | Playable | |
+| `startrgn` | Playable | |
+| `gjspace` | Playable | |
+| `ptblank3`, `gunbalina` | Playable | light gun (RetroArch lightgun / mouse, or the left stick) |
+| `gahaha`, `gahaha2` | Playable | EXIO: two sticks per player (left / right hand) on the RetroPad's left and right sticks |
+| `nflclsfb` | Playable | EXIO: the four trackballs' board on the EXIO's serial channel 0 (worked out from the game, not in MAME), pass buttons; I/O test passes |
+| `g13jnr` | Playable | MEM(P3), MP3 music; rifle: lightgun / mouse or left stick, trigger = button 2, scope sensor = a switch on button 3 (on at start) |
+| `nicetsuk` | Playable | MEM(P3), MP3 music |
+| `squizchs` | Playable | MEM(P3), MP3 music |
+| `taiko2`-`taikort` | Playable | the CD-ROM (an ATAPI drive on the CHD, `<rom dir>/<set>/<disk>.chd` as in MAME: `taiko2/nm-002.chd`, `taiko3/nm-003.chd`, `taiko4/tk-41.chd`, `taiko5/tk-5.chd`, `taiko6/tk-6.chd`, `taikort/tk-n.chd`), drums on the EXIO's analog inputs |
+| `ippo`, `ippo2` | Not working | "speed sensor error": punch pad sensors (not working in MAME either) |
+| `kd2001` | Not working | not working in MAME either |
+| medal games (`ballpom`, `pacmball`, `sekaikh`, ...) | Untested | MGEXIO (H8/3007) not emulated; not working in MAME |
+
 ## 4. Installation
 
 Build the core (see [Building from Source](#6-building-from-source)) and load `resys12_libretro.so` in RetroArch, or
-use the `namcos12` / `namcos11` systems of Recalbox, which ship it.
+use the `namcos12` / `namcos11` / `namcos10` systems of Recalbox, which ship it.
 
 ```bash
 retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
@@ -139,9 +187,10 @@ retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
   Files inside the zip are matched by CRC32, so their names do not matter.
 - Clone sets (for example `tektagtub`) read missing files from the parent zip (`tektagt.zip`), so keep the
   parent in the same folder, or use non-merged sets.
-- System 12 has no BIOS. System 11 needs `namcoc76.zip` next to the sets.
-- The CD-XA sets (`truckk`, `ujlnow`, `questff`) read their disc as MAME does: `<romdir>/<set>/<disc>.chd` next to the
-  zip. Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the same folder.
+- System 12 and System 10 have no BIOS. System 11 needs `namcoc76.zip` next to the sets.
+- The CD-XA sets (`truckk`, `ujlnow`, `questff`) and the System 10 Taiko sets read their disc as MAME does:
+  `<romdir>/<set>/<disc>.chd` next to the zip. Techno Drive also needs `namco_emio102.zip` (its I/O board ROM) in the
+  same folder.
 
 ## 5. Usage
 
@@ -153,6 +202,17 @@ meanwhile. The EEPROM is the core's save RAM (`.srm`); save states go through Re
 
 Gun games read the RetroArch lightgun device (or the left stick aims). Driving games: wheel on the left stick, R2 gas,
 L2 brake; Attack Pla Rail's lever is on the left stick.
+
+**System 10**: D-pad / left stick = lever, Y X B A L R = buttons 1-6 (EXIO analog sets: both sticks are the analog
+inputs), Start, Select = coin, R3 = service; L3 is the cabinet's test switch, a slide switch: each press flips it (with
+`resys12_service_mode` = `start_hold`, Start held alone 5 s flips it). Gun sets: lightgun device (trigger = button 1)
+or the left stick to aim. `nflclsfb` (a portrait screen: the core asks the frontend to turn it a quarter, as the
+cabinet's monitor; its test menus are landscape): players 1-4 each have a trackball (the mouse, or the left stick),
+Start, A / B = pass 1 / 2; player 1's Up / Down / Y = the cabinet's select up / down / enter, L / R / X of players 1
+and 3 = the left / right side's choose L / R and decide. Taiko no Tatsujin: Y / A = the left / right drum surface
+(Don), L / R = the left / right rim (Ka), players 1 and 2; player 1's Up / Down / Start = the cabinet's select up /
+down, enter. The game settings / records (NAND block 1, or the MEM(M) flash block at 0x40000) are the core's save RAM
+(`.srm`).
 
 ### Kart Duel link
 
@@ -174,15 +234,24 @@ the master, 2 for the other), so `resys12_link_id` is not needed. The cabinet id
 Builds are done on Linux (Ubuntu 24.04 is used for development).
 
 ```bash
-sudo apt install -y build-essential git python3 zlib1g-dev
-make -C libretro                          # native (x86_64: lightrec recompiler; LIGHTREC=0 for the interpreter)
-make -C libretro CC=aarch64-linux-gnu-gcc # Raspberry Pi 5, 64-bit OS (ari64 recompiler); needs an aarch64 zlib,
-                                          # e.g. LDFLAGS=-L<dir with libz.so>
+sudo apt install -y build-essential g++ git python3 zlib1g-dev
+make -C libretro                                   # native (x86_64: lightrec recompiler; LIGHTREC=0 for the interpreter)
+make -C libretro CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++  # Raspberry Pi 5, 64-bit OS (ari64 recompiler);
+                                                   # needs an aarch64 zlib, e.g. LDFLAGS=-L<dir with libz.so>
 ```
 
+The System 10 board and the TLCS-900/H core are C++ (C++20); the rest is C. The core links against libstdc++.
+
 Headless regression runs (RetroArch null drivers, scripted input, picture hashes): `libretro/tests/headless.py`
-(`--update` records the expected hashes; romset dirs in `RS12_ROMS` and `RS11_ROMS`, default `~/system12` and
-`~/system11`).
+(`--update` records the expected hashes; romset dirs in `RS12_ROMS`, `RS11_ROMS` and `RS10_ROMS`, default `~/system12`,
+`~/system11` and `~/system10`). `make -C libretro tlcs-test` builds the TLCS-900 recompiler check against MAME's
+interpreter (`libretro/tests/tlcs_jit_test.cpp`, inputs from `libretro/tests/tlcs_inputs.sh`).
+
+System 10 diagnostics (environment variables): `RS10_BUSLOG=n` (board accesses), `RS10_P3LOG` / `RS10_P3PROF` /
+`RS10_P3_CLOCK=percent` (the MEM(P3) sub CPU), `RS10_TLCS_NOJIT` / `RS10_TLCS_INTERP` / `RS10_TLCS_VERIFY` (the sub
+CPUs without host code, MAME's interpreter, the block decoder checked against it), `RS10_ATAPILOG`; the shared ones
+(`RS12_INPUT`, `RS12_DUMP_DIR`, `RS12_INTERP`, `RS12_CYCLE_MULT`, `RS12_PCM`, `RS12_UNMAPPED`) apply to every board.
+`tools/tlcsdis` (MAME's dasm900) disassembles TLCS-900/H dumps.
 
 ## 7. Project Layout
 
@@ -190,21 +259,24 @@ Headless regression runs (RetroArch null drivers, scripted input, picture hashes
 src/psx/       pcsx_rearmed subset: R3000A, ari64 recompiler, lightrec glue, GTE, gpulib, gpu_neon, System 12 shim
 src/s12/       System 12 board: memory map, KC0xx protection, ROM DMA, EEPROM, RTC, JVS I/O, CD-XA board, save states
 src/s11/       System 11 board: shared RAM, KEYCUS protection, EEPROM, ROM banks, gun board, C76 interface
+src/s10/       System 10 board (C++): memory boards, decrypters, NAND / flash, EXIO, MEM(P3) MP3 board, TLCS-900 recompiler,
+               ATAPI CD-ROM, save states; s10_games.inc = the set table generated from MAME
+src/tlcs900/   MAME TLCS-900/H and TMP95C061 cores (unchanged, against a small emu.h)
 src/m37710/    M37702 / M37710 interpreter (System 11 C76 sound / I/O MCU)
 src/h8/        H8/3002 sound / I/O CPU
 src/sh2/       SH-2 (System 12 CD-XA board)
-src/sound/     C352
+src/sound/     C352, LC82310 MP3 decoder (minimp3)
 src/romload/   MAME set tables (System 12, System 11), zip reader, ROM cache
 src/sys/       executable memory for the recompilers
-deps/          lightrec + GNU lightning (x86_64 recompiler), libchdr (CHD discs)
+deps/          lightrec + GNU lightning (x86_64 and aarch64 backends), libchdr (CHD discs), minimp3
 libretro/      libretro core (Linux x86_64 / ARM / aarch64, e.g. Raspberry Pi 5) and its headless tests
-tools/         table generators (System 11 sets from MAME namcos11.cpp)
+tools/         table generators (System 11 sets from MAME namcos11.cpp, System 10 from namcos10.cpp), tlcsdis
 ```
 
 ## 8. Accuracy and Testing
 
-- `libretro/tests/headless.py` runs every System 12 set and the System 11 sets with a hash file through RetroArch
-  (null drivers, scripted input) and compares the pictures with the recorded hashes.
+- `libretro/tests/headless.py` runs every System 12 set and the System 11 and System 10 sets with a hash file through
+  RetroArch (null drivers, scripted input) and compares the pictures with the recorded hashes.
 - The recompilers are checked against the interpreter: on x86_64 lightrec gives the interpreter's pictures exactly on
   every set; on the Pi 5, ari64 runs are compared with the interpreter's screens, and a lockstep interpreter /
   recompiler compare build exists for divergence hunts.
@@ -215,8 +287,9 @@ tools/         table generators (System 11 sets from MAME namcos11.cpp)
 
 **License.** ReSys12 is distributed under the [GNU General Public License, version 3](LICENSE).
 - The pcsx_rearmed code and the ReSys12 code are GPL-2.0-or-later (pcsx_rearmed's license text is in `src/psx/COPYING`).
-- The MAME parts (System 12 and System 11 boards, H8/3002, M37710, C352) are BSD-3-Clause.
-- lightrec is LGPL-2.1-or-later, GNU lightning LGPL-3.0-or-later, libchdr BSD-3-Clause.
+- The MAME parts (System 12, System 11 and System 10 boards, decrypters, NAND / flash, TLCS-900/H, LC82310, H8/3002,
+  M37710, C352, the generated tables) are BSD-3-Clause.
+- lightrec is LGPL-2.1-or-later, GNU lightning LGPL-3.0-or-later, libchdr BSD-3-Clause, minimp3 CC0.
 
 The original copyright headers are kept in all imported sources.
 
@@ -225,13 +298,15 @@ The original copyright headers are kept in all imported sources.
   System 12 emulation and the PS Vita port).
 - [pcsx_rearmed](https://github.com/notaz/pcsx_rearmed) (notaz, Ari64 and contributors): R3000A, ari64 recompiler,
   GTE, gpulib and gpu_neon.
-- [MAME](https://www.mamedev.org/) developers: System 12 and System 11 boards, H8/3002, M37710, C352, AT28C16, ROM
-  definitions and hardware research.
+- [MAME](https://www.mamedev.org/) developers: System 12, System 11 and System 10 boards (`namcos12.cpp`, `namcos11.cpp`,
+  `namcos10.cpp`, `ns10crypt.cpp`, `nandflash.cpp`, `intelfsh.cpp`, `lc82310.cpp`), H8/3002, M37710, TLCS-900/H, C352,
+  AT28C16, ROM definitions and hardware research.
 - [lightrec](https://github.com/pcercuei/lightrec) (Paul Cercueil) and [GNU lightning](https://www.gnu.org/software/lightning/):
-  the x86_64 recompiler. [libchdr](https://github.com/rtissera/libchdr): CHD disc images.
+  the x86_64 recompiler, and lightning the System 10 sub CPUs' host code. [libchdr](https://github.com/rtissera/libchdr):
+  CHD disc images. [minimp3](https://github.com/lieff/minimp3): MP3 decoding.
 - [JUnzip](https://github.com/jokkebk/JUnzip), [zlib](https://zlib.net/).
 
-**Trademarks.** Namco, System 11, System 12 and all game titles are trademarks of their respective owners. This project
+**Trademarks.** Namco, System 10, System 11, System 12 and all game titles are trademarks of their respective owners. This project
 is not affiliated with or endorsed by Bandai Namco or any rights holder. No ROM images, game graphics or logos are
 included in this repository.
 
