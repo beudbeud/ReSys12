@@ -43,7 +43,7 @@ drives its C352 from a Mitsubishi C76 (M37702) microcontroller. System 10 is a P
 flash or NAND memory board (see [System 10](#system-10)).
 
 ReSys12 is a [libretro](https://www.libretro.com/) core for Linux (x86_64, and ARM such as the Raspberry Pi 5). Recalbox
-ships it as the `namcos12`, `namcos11` and `namcos10` systems (core `resys12`); the core picks the board from the
+ships it as the `namcos12` and `namcos11` systems (core `resys12`); one `.so` runs the three boards, picked from the
 set name. Board accuracy is kept where the player can see or
 hear it; timing details that do not change what is on screen are simplified when that buys speed.
 
@@ -170,7 +170,7 @@ Statuses: headless runs (3600 frames: boot, coin, start, mashed buttons) on x86_
 ## 4. Installation
 
 Build the core (see [Building from Source](#6-building-from-source)) and load `resys12_libretro.so` in RetroArch, or
-use the `namcos12` / `namcos11` / `namcos10` systems of Recalbox, which ship it.
+use the `namcos12` / `namcos11` systems of Recalbox, which ship it (System 10 sets run from the same core).
 
 ```bash
 retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
