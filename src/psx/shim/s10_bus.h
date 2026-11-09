@@ -1,4 +1,4 @@
-// ReSys10: hooks from the pcsx_rearmed core into the System 10 board (src/s10). GPL-2.0-or-later.
+// ReSys12: hooks from the pcsx_rearmed core into the System 10 board (src/s10), dispatched by src/s12 (s12.s10). GPL-2.0-or-later.
 #ifndef S10_BUS_H
 #define S10_BUS_H
 

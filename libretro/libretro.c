@@ -875,6 +875,15 @@ static void test_hooks(uint32_t frame)
 		s12.in.player[0] |= p1;
 		s12.in.system |= cur_sys;
 	}
+	if (s12.s10 && dump_dir && getenv("RS12_RAMDUMP") && (uint32_t)atoi(getenv("RS12_RAMDUMP")) == frame) {
+		// System 10, tests/tlcs_inputs.sh: the sub CPUs' RAM (MEM(P3): p3ram_<frame>.bin at 0x800000, EXIO: exioram_)
+		char path[1200];
+		FILE *f;
+		snprintf(path, sizeof(path), "%s/p3ram_%06u.bin", dump_dir, frame);
+		if (s10_memp3_active() && (f = fopen(path, "wb"))) { s10_memp3_dump(f); fclose(f); }
+		snprintf(path, sizeof(path), "%s/exioram_%06u.bin", dump_dir, frame);
+		if (s10_exio_active() && (f = fopen(path, "wb"))) { s10_exio_dump(f); fclose(f); }
+	}
 #ifdef RS12_HARNESS
 	{ // RS12_RAMDUMP=frame,frame,...: main RAM to <RS12_DUMP_DIR>/ram_<frame>.bin; RS12_WATCH=lo-hi[,from]: stores logged
 		static const char *rd; static int rd_init;
