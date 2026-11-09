@@ -2,7 +2,7 @@
 
 <p align="center">
   <b>Namco System 12, System 11 and System 10 arcade emulator, as a libretro core</b><br>
-  pcsx_rearmed based &middot; R3000A dynarecs (aarch64, ARMv7, x86_64) &middot; NEON GPU rasterizer &middot; C352 and SPU sound<br>
+  pcsx_rearmed based &middot; R3000A dynarecs (aarch64, x86_64) &middot; NEON GPU rasterizer &middot; C352 and SPU sound<br>
   Fork of <a href="https://github.com/Reyanon/ReSys12">ReSys12</a> by Reyanon
 </p>
 
@@ -43,8 +43,8 @@ drives its C352 from a Mitsubishi C76 (M37702) microcontroller. System 10 is a P
 flash or NAND memory board (see [System 10](#system-10)).
 
 ReSys12 is a [libretro](https://www.libretro.com/) core for Linux (x86_64, and ARM such as the Raspberry Pi 5). Recalbox
-ships it as the `namcos12` and `namcos11` systems (core `resys12`); one `.so` runs the three boards, picked from the
-set name. Board accuracy is kept where the player can see or
+ships it as the `namcos12`, `namcos11` and `namcos10` systems (core `resys12`); one `.so` runs the three boards, picked
+from the set name. Board accuracy is kept where the player can see or
 hear it; timing details that do not change what is on screen are simplified when that buys speed.
 
 ## 2. Highlights
@@ -170,7 +170,7 @@ Statuses: headless runs (3600 frames: boot, coin, start, mashed buttons) on x86_
 ## 4. Installation
 
 Build the core (see [Building from Source](#6-building-from-source)) and load `resys12_libretro.so` in RetroArch, or
-use the `namcos12` / `namcos11` systems of Recalbox, which ship it (System 10 sets run from the same core).
+use the `namcos12` / `namcos11` / `namcos10` systems of Recalbox, which ship it.
 
 ```bash
 retroarch -L libretro/resys12_libretro.so roms/tektagt.zip
@@ -241,6 +241,8 @@ make -C libretro CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++  # Raspberry
 ```
 
 The System 10 board and the TLCS-900/H core are C++ (C++20); the rest is C. The core links against libstdc++.
+ARMv7 (32-bit) is not a supported target any more: the System 10 TLCS-900 recompiler emits its code through GNU
+lightning, whose vendored copy has no arm32 backend.
 
 Headless regression runs (RetroArch null drivers, scripted input, picture hashes): `libretro/tests/headless.py`
 (`--update` records the expected hashes; romset dirs in `RS12_ROMS`, `RS11_ROMS` and `RS10_ROMS`, default `~/system12`,
